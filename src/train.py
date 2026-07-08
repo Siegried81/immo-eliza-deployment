@@ -17,9 +17,12 @@ from features import add_features
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
+
 DATA_PATH = BASE_DIR / "data" / "clean" / "cleaned_data.json"
 MODEL_DIR = BASE_DIR / "models"
-MODEL_PATH = MODEL_DIR / "best_XGBoost.joblib"
+
+XGB_MODEL_PATH = MODEL_DIR / "best_XGBoost.json"
+PREPROCESSOR_PATH = MODEL_DIR / "preprocessor.joblib"
 
 TARGET = "price"
 
@@ -44,7 +47,7 @@ CATEGORICAL_FEATURES = [
     "property_type",
     "province",
     "city",
-    "property_state"
+    "property_state",
 ]
 
 
@@ -54,9 +57,7 @@ def load_data(path):
     lower = df["price"].quantile(0.01)
     upper = df["price"].quantile(0.99)
 
-    df = df[(df["price"] >= lower) & (df["price"] <= upper)]
-
-    return df
+    return df[(df["price"] >= lower) & (df["price"] <= upper)]
 
 
 def clean_target(y):
@@ -64,6 +65,7 @@ def clean_target(y):
 
 
 def build_preprocessor():
+
     num = Pipeline([
         ("imputer", IterativeImputer(max_iter=10, random_state=42))
     ])
@@ -80,6 +82,7 @@ def build_preprocessor():
 
 
 def build_model():
+
     return XGBRegressor(
         n_estimators=1500,
         learning_rate=0.03,
@@ -92,31 +95,54 @@ def build_model():
 
 
 def train():
+
     df = load_data(DATA_PATH)
     df = add_features(df)
 
     X = df.drop(columns=[TARGET])
     y = clean_target(np.log1p(df[TARGET]))
 
-    X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.3, random_state=42)
-    X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, random_state=42)
-
-    preprocessor = build_preprocessor()
-    model = build_model()
-
-    X_train_p = preprocessor.fit_transform(X_train)
-    X_val_p = preprocessor.transform(X_val)
-
-    model.fit(X_train_p, y_train)
-
-    os.makedirs(MODEL_DIR, exist_ok=True)
-
-    joblib.dump(
-        {"model": model, "preprocessor": preprocessor},
-        MODEL_PATH
+    X_train, X_temp, y_train, y_temp = train_test_split(
+        X,
+        y,
+        test_size=0.3,
+        random_state=42
     )
 
-    print(f"Model saved at {MODEL_PATH}")
+    X_val, X_test, y_val, y_test = train_test_split(
+        X_temp,
+        y_temp,
+        test_size=0.5,
+        random_state=42
+    )
+
+    preprocessor = build_preprocessor()
+
+    X_train_p = preprocessor.fit_transform(X_train)
+
+    model = build_model()
+
+    model.fit(
+        X_train_p,
+        y_train
+    )
+
+    os.makedirs(
+        MODEL_DIR,
+        exist_ok=True
+    )
+
+    model.save_model(
+        XGB_MODEL_PATH
+    )
+
+    joblib.dump(
+        preprocessor,
+        PREPROCESSOR_PATH
+    )
+
+    print(f"Model saved at {XGB_MODEL_PATH}")
+    print(f"Preprocessor saved at {PREPROCESSOR_PATH}")
 
 
 if __name__ == "__main__":

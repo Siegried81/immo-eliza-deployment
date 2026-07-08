@@ -66,6 +66,20 @@ The Streamlit application:
 
 ---
 
+### Live Demo
+
+I have successfully deployed my application on Render, and we can access the live version of the project here: https://immo-eliza-streamlit-6wty.onrender.com
+And on Service Community Cloud: immo-eliza-deployment-siegried.streamlit.app
+
+### How to Use
+
+I designed this application to make real estate price predictions easy to access. To use it, you can simply navigate to my Live Demo and follow these steps:
+Input Data: enter the specific characteristics of the property you want to evaluate into the provided fields in the interface.
+Predict: click the "Predict" button to trigger my machine learning model.
+Result: receive an estimated price for the property based on the features you provided.
+
+---
+
 # 📁 Project Structure
 
 ```
@@ -95,9 +109,21 @@ immo-eliza-deployment
 ├── .gitignore
 ├── README.txt
 ├── docker-compose.yml
+<<<<<<< HEAD
+=======
+├── main.py
+>>>>>>> d9d37d2 (Modify predict)
 └── requirements.txt
 
 ```
+
+* **`api/`**: I use this folder to house my backend application. It contains the `Dockerfile` for containerization, the `app.py` script to run my service, and `predict.py` to handle my model inference requests.
+* **`models/`**: I store my trained model artifacts here, specifically my `best_XGBoost.joblib` file, which I use for property price predictions.
+* **`monitoring/`**: I maintain this folder to track my model's performance in production. It includes `drift.py` for detecting data drift, `logger.py` to record events, and `monitoring.py` as my main monitoring orchestrator.
+* **`src/`**: I keep my core source code here. This is where I manage my data processing through `features.py` and handle my model training pipeline in `train.py`.
+* **`streamlit/`**: I organize my frontend application here. I include its own `Dockerfile` to containerize my user interface and my `app.py` script to launch my Streamlit dashboard.
+* **`docker-compose.yml`**: I use this file to define and run my multi-container setup, allowing me to orchestrate both my API and Streamlit services together.
+* **`main.py`**: I use this as the primary entry point for my project to coordinate my overall workflow.
 
 ---
 
@@ -307,7 +333,7 @@ The application sends the information to the FastAPI backend and displays the es
 ## Clone repository
 
 ```bash
-git clone https://github.com/<username>/immo-eliza-deployment.git
+git clone https://github.com/Siegried81/immo-eliza-deployment.git
 
 cd immo-eliza-deployment
 ```
@@ -335,7 +361,7 @@ uvicorn api.app:app --reload
 API:
 
 ```
-http://127.0.0.1:8000
+API_URL = os.getenv("API_URL", "https://immo-eliza-deployment-ujgj.onrender.com/predict").strip()
 ```
 
 ---
@@ -441,5 +467,13 @@ streamlit/
 # 👩‍💻 Author
 
 **Siegried Camus**
+<<<<<<< HEAD
 
 Immo Eliza Deployment project developed as part of the BeCode AI & Data Science Bootcamp.
+=======
+Immo Eliza Deployment project developed as part of the BeCode AI & Data Science Bootcamp.
+
+
+
+===========================================================================================
+>>>>>>> d9d37d2 (Modify predict)
