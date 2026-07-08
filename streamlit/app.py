@@ -106,15 +106,17 @@ with col2:
     )
 
     livable_surface = st.number_input(
-        "Livable Surface (m²)",
-        min_value=1.0,
-        value=80.0
+        "Livable Surface (m²)", 
+        min_value=0, 
+        value=80, 
+        step=1, 
+        format="%d"
     )
 
     total_surface = st.number_input(
         "Total Surface (m²)",
-        min_value=0.0,
-        value=100.0
+        min_value=0,
+        value=100
     )
 
     bedroom_count = st.number_input(
@@ -138,14 +140,14 @@ with col2:
 
     garden_m2 = st.number_input(
         "Garden (m²)",
-        min_value=0.0,
-        value=0.0
+        min_value=0,
+        value=0
     )
 
     terrace = st.number_input(
         "Terrace (m²)",
-        min_value=0.0,
-        value=0.0
+        min_value=0,
+        value=0
     )
 
     swimming_pool = st.checkbox(
@@ -168,20 +170,20 @@ with col3:
 
     preschool_distance_m = st.number_input(
         "Preschool Distance (m)",
-        min_value=0.0,
-        value=500.0
+        min_value=0,
+        value=500
     )
 
     train_station_distance_m = st.number_input(
         "Train Station Distance (m)",
-        min_value=0.0,
-        value=800.0
+        min_value=0,
+        value=800
     )
 
     supermarket_distance_m = st.number_input(
         "Supermarket Distance (m)",
-        min_value=0.0,
-        value=400.0
+        min_value=0,
+        value=400
     )
 
 # =====================================================
