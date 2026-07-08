@@ -1,6 +1,6 @@
-import streamlit as st
-import requests
 import os
+import requests
+import streamlit as st
 
 # =====================================================
 # CONFIG
@@ -8,15 +8,34 @@ import os
 
 API_URL = os.getenv("API_URL", "https://immo-eliza-deployment-ujgj.onrender.com/predict").strip()
 
+PROPERTY_TYPES = [
+    "HOUSE",
+    "APARTMENT"
+]
+
 PROPERTY_STATES = [
-    "New",
-    "Excellent",
-    "Fully renovated",
-    "Under construction",
-    "Normal",
-    "To renovate",
-    "To restore",
-    "To demolish"
+    "NEW",
+    "EXCELLENT",
+    "FULLY_RENOVATED",
+    "UNDER_CONSTRUCTION",
+    "NORMAL",
+    "TO_RENOVATE",
+    "TO_RESTORE",
+    "TO_DEMOLISH"
+]
+
+PROVINCES = [
+    "Brussels",
+    "Antwerp",
+    "East Flanders",
+    "West Flanders",
+    "Flemish Brabant",
+    "Walloon Brabant",
+    "Hainaut",
+    "Liège",
+    "Limburg",
+    "Luxembourg",
+    "Namur"
 ]
 
 # =====================================================
@@ -36,7 +55,10 @@ st.set_page_config(
 st.title("🏠 Immo Eliza Predictor")
 st.write("Belgian property price prediction using XGBoost")
 
-# Create 3 columns
+# =====================================================
+# LAYOUT
+# =====================================================
+
 col1, col2, col3 = st.columns(3)
 
 # =====================================================
@@ -55,14 +77,13 @@ with col1:
 
     province = st.selectbox(
         "Province",
-        [
-            "Brussels", "Antwerp", "East Flanders", "West Flanders", 
-            "Flemish Brabant", "Walloon Brabant", "Hainaut", "Liège", 
-            "Limburg", "Luxembourg", "Namur"
-        ]
+        PROVINCES
     )
 
-    city = st.text_input("City", value="Brussels")
+    city = st.text_input(
+        "City",
+        value="Brussels"
+    )
 
 # =====================================================
 # PROPERTY (Column 2)
@@ -71,16 +92,65 @@ with col1:
 with col2:
     st.header("🏡 Property")
 
-    property_type = st.selectbox("Type", ["House", "Apartment"])
-    property_state = st.selectbox("State", PROPERTY_STATES, index=4)
-    livable_surface = st.number_input("Livable Surface", min_value=1.0, value=80.0)
-    total_surface = st.number_input("Total Surface", min_value=0.0, value=100.0)
-    bedroom_count = st.number_input("Bedrooms", min_value=0, value=2)
-    build_year = st.number_input("Build Year", min_value=1800, max_value=2026, value=2000)
-    garage = st.number_input("Garage", min_value=0, value=0)
-    garden_m2 = st.number_input("Garden m²", min_value=0.0, value=0.0)
-    terrace = st.number_input("Terrace m²", min_value=0.0, value=0.0)
-    swimming_pool = st.checkbox("Swimming Pool")
+    property_type = st.selectbox(
+        "Type",
+        PROPERTY_TYPES,
+        format_func=lambda x: x.title()
+    )
+
+    property_state = st.selectbox(
+        "State",
+        PROPERTY_STATES,
+        index=4,
+        format_func=lambda x: x.replace("_", " ").title()
+    )
+
+    livable_surface = st.number_input(
+        "Livable Surface (m²)",
+        min_value=1.0,
+        value=80.0
+    )
+
+    total_surface = st.number_input(
+        "Total Surface (m²)",
+        min_value=0.0,
+        value=100.0
+    )
+
+    bedroom_count = st.number_input(
+        "Bedrooms",
+        min_value=0,
+        value=2
+    )
+
+    build_year = st.number_input(
+        "Build Year",
+        min_value=1800,
+        max_value=2026,
+        value=2000
+    )
+
+    garage = st.number_input(
+        "Garage Spaces",
+        min_value=0,
+        value=0
+    )
+
+    garden_m2 = st.number_input(
+        "Garden (m²)",
+        min_value=0.0,
+        value=0.0
+    )
+
+    terrace = st.number_input(
+        "Terrace (m²)",
+        min_value=0.0,
+        value=0.0
+    )
+
+    swimming_pool = st.checkbox(
+        "Swimming Pool"
+    )
 
 # =====================================================
 # DISTANCES & ENERGY (Column 3)
@@ -90,14 +160,29 @@ with col3:
     st.header("🌱 Distances & Energy")
 
     energy_consumption = st.number_input(
-        "Energy consumption",
+        "Energy Consumption (kWh/m²/year)",
         min_value=0.0,
         value=0.0,
         help="0 means automatic replacement using the average consumption of the selected property state."
     )
-    preschool_distance_m = st.number_input("Preschool distance", min_value=0.0, value=500.0)
-    train_station_distance_m = st.number_input("Train station distance", min_value=0.0, value=800.0)
-    supermarket_distance_m = st.number_input("Supermarket distance", min_value=0.0, value=400.0)
+
+    preschool_distance_m = st.number_input(
+        "Preschool Distance (m)",
+        min_value=0.0,
+        value=500.0
+    )
+
+    train_station_distance_m = st.number_input(
+        "Train Station Distance (m)",
+        min_value=0.0,
+        value=800.0
+    )
+
+    supermarket_distance_m = st.number_input(
+        "Supermarket Distance (m)",
+        min_value=0.0,
+        value=400.0
+    )
 
 # =====================================================
 # PREDICTION
@@ -105,10 +190,10 @@ with col3:
 
 st.divider()
 
-btn_col1, btn_col2, btn_col3 = st.columns([1, 2, 1])
+left, center, right = st.columns([1, 2, 1])
 
-with btn_col2:
-    if st.button("🔮 Predict price", use_container_width=True):
+with center:
+    if st.button("🔮 Predict Price", use_container_width=True):
 
         payload = {
             "postcode": postcode,
@@ -132,21 +217,42 @@ with btn_col2:
             "nearest_city_distance_km": 0
         }
 
-        # Check if URL is valid before calling requests
         if not API_URL.startswith("http"):
-            st.error(f"Invalid API URL: '{API_URL}'. Please check Render Environment variables.")
+            st.error(
+                f"Invalid API URL: '{API_URL}'. Please check your environment variables."
+            )
+
         else:
             try:
-                # Use a timeout to prevent the app from hanging
-                response = requests.post(API_URL, json=payload, timeout=10)
+                response = requests.post(
+                    API_URL,
+                    json=payload,
+                    timeout=10
+                )
 
                 if response.status_code == 200:
                     result = response.json()
-                    st.success(f"Estimated price: € {result['prediction']:,.0f}")
+
+                    st.success(
+                        f"Estimated price: € {result['prediction']:,.0f}"
+                    )
+
                 else:
-                    st.error(f"API Error ({response.status_code}): {response.text}")
+                    st.error(
+                        f"API Error ({response.status_code}): {response.text}"
+                    )
 
             except requests.exceptions.ConnectionError:
-                st.error("Connection Error: Could not reach the API. Ensure the API service is 'Live' on Render.")
+                st.error(
+                    "Connection error: Unable to reach the API. Please verify that the API service is running."
+                )
+
+            except requests.exceptions.Timeout:
+                st.error(
+                    "The request timed out. Please try again."
+                )
+
             except Exception as e:
-                st.error(f"An unexpected error occurred: {e}")
+                st.error(
+                    f"Unexpected error: {e}"
+                )
