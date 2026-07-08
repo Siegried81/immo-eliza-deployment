@@ -224,8 +224,14 @@ with btn_col2:
             "nearest_city_distance_km": 0
         }
 
-        st.write(f"DEBUG: Try to connect -> {API_URL}")
-        
+        # Clean the URL and inspect its structure
+        raw_url = os.getenv("API_URL", "https://immo-eliza-deployment-ujgj.onrender.com/predict")
+        API_URL = str(raw_url).strip()
+
+        # Debugging: Use repr() to see hidden characters like \n or spaces
+        st.write(f"DEBUG: URL is: '{API_URL}'")
+        st.write(f"DEBUG: Representation: {repr(API_URL)}")
+                
         try:
             response = requests.post(
                 API_URL,
