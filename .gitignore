@@ -47,7 +47,6 @@ monitoring/logs.json
 data/raw/
 data/clean/
 *.csv
-*.json
 
 .docker/
 
