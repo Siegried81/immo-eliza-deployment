@@ -11,14 +11,14 @@ import os
 API_URL = str(os.getenv("API_URL", "https://immo-eliza-deployment-ujgj.onrender.com/predict")).strip()
 
 PROPERTY_STATES = [
-    "NEW",
-    "EXCELLENT",
-    "FULLY_RENOVATED",
-    "UNDER_CONSTRUCTION",
-    "NORMAL",
-    "TO_RENOVATE",
-    "TO_RESTORE",
-    "TO_DEMOLISH"
+    "New",
+    "Excellent",
+    "Fully renovated",
+    "Under construction",
+    "Normal",
+    "To renovate",
+    "To restore",
+    "To demolish"
 ]
 
 
@@ -90,8 +90,8 @@ with col2:
     property_type = st.selectbox(
         "Type",
         [
-            "HOUSE",
-            "APARTMENT"
+            "House",
+            "Apartment"
         ]
     )
 
@@ -224,7 +224,7 @@ with btn_col2:
             "nearest_city_distance_km": 0
         }
 
-        st.write(f"DEBUG: Tentative de connexion à -> {API_URL}")
+        st.write(f"DEBUG: Try to connect -> {API_URL}")
         
         try:
             response = requests.post(
