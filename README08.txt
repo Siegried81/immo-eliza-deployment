@@ -1,6 +1,5 @@
-Voici un README complet adapté à ton projet **Immo Eliza Deployment**, avec ton architecture actuelle (**FastAPI + Docker + Streamlit + modèle XGBoost**) et les instructions demandées. Tu peux le mettre directement dans `README.md`.
 
-```markdown
+```
 # 🏠 Immo Eliza Deployment
 
 ## Mission
@@ -73,37 +72,30 @@ The Streamlit application:
 
 immo-eliza-deployment
 │
-├── api
-│   │
-│   ├── app.py                  # FastAPI application
-│   ├── predict.py              # Model loading and prediction logic
-│   ├── Dockerfile              # Docker configuration
-│   │
-│   ├── models
-│   │   └── best_XGBoost.joblib # Trained model artifacts
-│   │
-│   └── requirements.txt
-│
-│
-├── monitoring
-│   │
-│   ├── monitoring.py            # Prediction logging and drift detection
-│   └── logs.json
-│
-│
-├── src
-│   │
-│   └── features.py              # Feature engineering pipeline
-│
-│
-├── streamlit
-│   │
-│   └── app.py                   # Streamlit frontend application
-│
-│
-├── README.md
-├── requirements.txt
-└── .gitignore
+├── api/
+│   ├── Dockerfile
+│   ├── __init__.py
+│   ├── app.py
+│   └── predict.py
+├── models/
+│   └── best_XGBoost.joblib
+├── monitoring/
+│   ├── __init__.py
+│   ├── drift.py
+│   ├── logger.py
+│   └── monitoring.py
+├── src/
+│   ├── __init__.py
+│   ├── features.py
+│   └── train.py
+├── streamlit/
+│   ├── Dockerfile
+│   ├── __init__.py
+│   └── app.py
+├── .gitignore
+├── README.txt
+├── docker-compose.yml
+└── requirements.txt
 
 ```
 
@@ -444,24 +436,10 @@ Required files:
 streamlit/
 └── app.py
 ```
-
----
-
-# ✅ Deliverables Checklist
-
-| Requirement                                   | Status |
-| --------------------------------------------- | ------ |
-| Machine learning model trained and predicting | ✅      |
-| FastAPI API created                           | ✅      |
-| Prediction endpoint available                 | ✅      |
-| Dockerfile created                            | ✅      |
-| Streamlit application created                 | ✅      |
-| API and frontend connected                    | ✅      |
-| Model artifacts included                      | ✅      |
-| Clean GitHub repository                       | ✅      |
-
 ---
 
 # 👩‍💻 Author
 
-Immo Eliza Deployment project developed as part of the BeCode Machine Learning training.
+**Siegried Camus**
+
+Immo Eliza Deployment project developed as part of the BeCode AI & Data Science Bootcamp.
