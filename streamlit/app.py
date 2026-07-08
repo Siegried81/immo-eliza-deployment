@@ -8,7 +8,7 @@ import os
 # CONFIG
 # =====================================================
 
-API_URL = os.getenv("API_URL", "http://127.0.0.1:8000/predict")
+API_URL = str(os.getenv("API_URL", "https://immo-eliza-deployment-ujgj.onrender.com/predict")).strip()
 
 PROPERTY_STATES = [
     "NEW",
@@ -224,7 +224,8 @@ with btn_col2:
             "nearest_city_distance_km": 0
         }
 
-
+        st.write(f"DEBUG: Tentative de connexion à -> {API_URL}")
+        
         try:
             response = requests.post(
                 API_URL,
