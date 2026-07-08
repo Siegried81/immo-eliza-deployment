@@ -2,11 +2,16 @@ import os
 import requests
 import streamlit as st
 
-# =====================================================
-# CONFIG
-# =====================================================
+# Application configuration.
+# This section defines:
+# - The API endpoint used for predictions.
+# - The possible values accepted by the machine learning model.
+# - The display translations used in the user interface.
 
-API_URL = os.getenv("API_URL", "https://immo-eliza-deployment-ujgj.onrender.com/predict").strip()
+API_URL = os.getenv(
+    "API_URL",
+    "https://immo-eliza-deployment-ujgj.onrender.com/predict"
+).strip()
 
 PROPERTY_TYPES = [
     "HOUSE",
@@ -38,9 +43,24 @@ PROVINCES = [
     "Namur"
 ]
 
-# =====================================================
-# PAGE CONFIG
-# =====================================================
+# Display translations for Dutch-speaking users.
+# The original English values are kept for model compatibility.
+
+DUTCH_PROVINCES = {
+    "Brussels": "Brussel",
+    "Antwerp": "Antwerpen",
+    "East Flanders": "Oost-Vlaanderen",
+    "West Flanders": "West-Vlaanderen",
+    "Flemish Brabant": "Vlaams-Brabant",
+    "Walloon Brabant": "Waals-Brabant",
+    "Hainaut": "Henegouwen",
+    "Liège": "Luik",
+    "Limburg": "Limburg",
+    "Luxembourg": "Luxemburg",
+    "Namur": "Namen",
+}
+
+# Streamlit page configuration.
 
 st.set_page_config(
     page_title="Immo Eliza Predictor",
@@ -48,22 +68,17 @@ st.set_page_config(
     layout="wide"
 )
 
-# =====================================================
-# HEADER
-# =====================================================
+# Application header.
 
 st.title("🏠 Immo Eliza Predictor")
 st.write("Belgian property price prediction using XGBoost")
 
-# =====================================================
-# LAYOUT
-# =====================================================
+# Create three columns to organize the prediction form.
 
 col1, col2, col3 = st.columns(3)
 
-# =====================================================
-# LOCATION (Column 1)
-# =====================================================
+# Location inputs.
+# These values are used as model features.
 
 with col1:
     st.header("📍 Location")
@@ -77,7 +92,8 @@ with col1:
 
     province = st.selectbox(
         "Province",
-        PROVINCES
+        PROVINCES,
+        format_func=lambda p: DUTCH_PROVINCES[p]
     )
 
     city = st.text_input(
@@ -85,9 +101,8 @@ with col1:
         value="Brussels"
     )
 
-# =====================================================
-# PROPERTY (Column 2)
-# =====================================================
+# Property characteristics.
+# These inputs describe the main attributes of the property.
 
 with col2:
     st.header("🏡 Property")
@@ -106,10 +121,10 @@ with col2:
     )
 
     livable_surface = st.number_input(
-        "Livable Surface (m²)", 
-        min_value=0, 
-        value=80, 
-        step=1, 
+        "Livable Surface (m²)",
+        min_value=0,
+        value=80,
+        step=1,
         format="%d"
     )
 
@@ -154,17 +169,16 @@ with col2:
         "Swimming Pool"
     )
 
-# =====================================================
-# DISTANCES & ENERGY (Column 3)
-# =====================================================
+# Distance and energy inputs.
+# These features provide additional information used by the prediction model.
 
 with col3:
     st.header("🌱 Distances & Energy")
 
     energy_consumption = st.number_input(
         "Energy Consumption (kWh/m²/year)",
-        min_value=0.0,
-        value=0.0,
+        min_value=0,
+        value=0,
         help="0 means automatic replacement using the average consumption of the selected property state."
     )
 
@@ -186,16 +200,19 @@ with col3:
         value=400
     )
 
-# =====================================================
-# PREDICTION
-# =====================================================
+# Prediction request.
+# The user inputs are converted into a JSON payload and sent to the API.
 
 st.divider()
 
 left, center, right = st.columns([1, 2, 1])
 
 with center:
-    if st.button("🔮 Predict Price", use_container_width=True):
+
+    if st.button(
+        "🔮 Predict Price",
+        use_container_width=True
+    ):
 
         payload = {
             "postcode": postcode,
@@ -219,42 +236,56 @@ with center:
             "nearest_city_distance_km": 0
         }
 
+        # Check that the API URL is valid.
         if not API_URL.startswith("http"):
+
             st.error(
                 f"Invalid API URL: '{API_URL}'. Please check your environment variables."
             )
 
         else:
+
             try:
+
                 response = requests.post(
                     API_URL,
                     json=payload,
                     timeout=10
                 )
 
+                # Display the prediction returned by the API.
                 if response.status_code == 200:
+
                     result = response.json()
 
                     st.success(
                         f"Estimated price: € {result['prediction']:,.0f}"
                     )
 
+                # Display API errors returned by the server.
                 else:
+
                     st.error(
                         f"API Error ({response.status_code}): {response.text}"
                     )
 
+            # Handle API connection problems.
             except requests.exceptions.ConnectionError:
+
                 st.error(
                     "Connection error: Unable to reach the API. Please verify that the API service is running."
                 )
 
+            # Handle API timeout errors.
             except requests.exceptions.Timeout:
+
                 st.error(
                     "The request timed out. Please try again."
                 )
 
+            # Handle unexpected errors.
             except Exception as e:
+
                 st.error(
                     f"Unexpected error: {e}"
                 )

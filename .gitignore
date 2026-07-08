@@ -44,9 +44,9 @@ monitoring/logs.json
 *.pickle
 
 
-data/raw/
-data/clean/
+data/
 *.csv
+logs.json
 
 .docker/
 
