@@ -1,6 +1,10 @@
+import sys
+import os
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from typing import Literal
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from api.predict import engine
 from monitoring.monitoring import log_prediction
