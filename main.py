@@ -4,7 +4,6 @@ import shutil
 import time
 
 def run_services():
-    # Use shutil.which to find the absolute path of the executables in the current path
     uvicorn_path = shutil.which("uvicorn")
     streamlit_path = shutil.which("streamlit")
 
@@ -18,7 +17,6 @@ def run_services():
     
     print(f"Launching API and Streamlit...")
     
-    # Use subprocess.Popen with shell=False for security and stability
     api_process = subprocess.Popen(api_cmd)
     
     print("Waiting 10 seconds for API to initialize...")

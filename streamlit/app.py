@@ -1,13 +1,14 @@
 import streamlit as st
 import requests
 from pathlib import Path
+import os
 
 
 # =====================================================
 # CONFIG
 # =====================================================
 
-API_URL = "http://127.0.0.1:8000/predict"
+API_URL = os.getenv("API_URL", "http://127.0.0.1:8000/predict")
 
 PROPERTY_STATES = [
     "NEW",
@@ -230,16 +231,11 @@ with btn_col2:
                 json=payload
             )
 
-            result = response.json()
-
             if response.status_code == 200:
-                st.success(
-                    f"Estimated price: € {result['prediction']:,.0f}"
-                )
+                result = response.json()
+                st.success(f"Estimated price: € {result['prediction']:,.0f}")
             else:
-                st.error(result)
+                st.error(f"API Error ({response.status_code}): {response.text}")
 
         except Exception as e:
-            st.error(
-                f"API connection error: {e}"
-            )
+            st.error(f"API connection error: {e}")
