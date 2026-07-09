@@ -83,7 +83,7 @@ with center:
         try:
             with st.spinner("Calculating prediction..."):
                 # Concatenate /predict to use the dynamic base URL[cite: 1]
-                response = requests.post(f"{API_URL}/predict", json=payload, timeout=10)
+                response = requests.post(f"{API_URL}/predict", json=payload, timeout=80)
 
             if response.status_code == 200:
                 result = response.json()
