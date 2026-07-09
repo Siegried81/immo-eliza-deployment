@@ -1,9 +1,6 @@
 import sys
 from pathlib import Path
 
-# Add the project root directory to the Python path BEFORE importing the
-# app, otherwise this insertion has no effect (inserting into sys.path
-# after the import that needs it is too late).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest

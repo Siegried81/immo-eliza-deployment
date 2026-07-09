@@ -4,7 +4,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-# Define path to the log file inside the monitoring directory
 BASE_DIR = Path(__file__).resolve().parent
 LOG_FILE = BASE_DIR / "logs.json"
 

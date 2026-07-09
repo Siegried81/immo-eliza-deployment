@@ -3,7 +3,6 @@ import joblib
 import numpy as np
 import pandas as pd
 from pathlib import Path
-import xgboost as xgb
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 SRC_DIR = BASE_DIR / "src"
@@ -11,32 +10,35 @@ SRC_DIR = BASE_DIR / "src"
 sys.path.insert(0, str(SRC_DIR))
 from features import add_features
 
-# Paths
-MODEL_PATH = BASE_DIR / "models" / "best_XGBoost.json"
-PREPROCESSOR_PATH = BASE_DIR / "models" / "preprocessor.joblib"
+PIPELINE_PATH = BASE_DIR / "models" / "pipeline.joblib"
 TEST_FILE = BASE_DIR / "data" / "clean" / "cleaned_data.json"
 
-def evaluate_model(json_path):
-    if not MODEL_PATH.exists():
-        raise FileNotFoundError(f"Model not found at: {MODEL_PATH}")
 
-    # Load model and preprocessor
-    model = xgb.XGBRegressor()
-    model.load_model(MODEL_PATH)
-    preprocessor = joblib.load(PREPROCESSOR_PATH)
+def evaluate_model(json_path):
+    """
+        Loads a pre-trained machine learning pipeline and evaluates its performance 
+        against a dataset of real estate properties.
+        Args: json_path (str or Path): The file path to the cleaned JSON dataset 
+                containing 'price' and property features.
+        Returns: tuple: (predictions, actual_prices) where predictions are the model's 
+                estimated prices and actual_prices are the ground truth values.
+        Raises: FileNotFoundError: If the pipeline file is missing at the expected location.
+        """
+    if not PIPELINE_PATH.exists():
+        raise FileNotFoundError(f"Pipeline not found at: {PIPELINE_PATH}")
+
+    pipeline = joblib.load(PIPELINE_PATH)   # <-- cette ligne doit être présente
 
     df = pd.read_json(json_path)
     actual_prices = df["price"].values
 
-    # Process features
     df = add_features(df.drop(columns=["price"]))
 
-    # Predict
-    X = preprocessor.transform(df)
-    preds_log = model.predict(X)
+    preds_log = pipeline.predict(df)
     preds = np.expm1(preds_log)
 
     return preds, actual_prices
+
 
 if __name__ == "__main__":
     if TEST_FILE.exists():
