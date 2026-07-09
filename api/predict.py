@@ -4,7 +4,18 @@ import pandas as pd
 from pathlib import Path
 import sys
 import xgboost as xgb
+import logging
+import sys
+from pathlib import Path
 
+project_root = Path(__file__).resolve().parents[1]
+if str(project_root) not in sys.path:
+    sys.path.append(str(project_root))
+from monitoring.monitor import calculate_psi
+
+# Configure logging for drift warnings
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 """
 Define the project root directory.
@@ -33,6 +44,11 @@ the same features as during model training.
 """
 from features import add_features
 
+"""
+Import monitoring logic for drift detection.
+"""
+from monitoring.monitor import calculate_psi
+
 
 """
 Define paths for the trained model and preprocessing pipeline.
@@ -55,6 +71,7 @@ Prediction engine class.
 This class:
 - Loads the trained XGBoost model and preprocessor
 - Transforms new property data
+- Checks for data drift
 - Generates price predictions
 """
 class PredictionEngine:
@@ -84,6 +101,16 @@ class PredictionEngine:
             raise PredictionError(f"Failed to initialize prediction engine: {str(e)}")
 
     """
+    Internal helper to check for data drift.
+    """
+    def _check_drift(self, df: pd.DataFrame):
+        psi_values = calculate_psi(df)
+        for feature, psi in psi_values.items():
+            if psi > 0.25:
+                logger.warning(f"🚨 CRITICAL DRIFT detected in {feature}: PSI={psi:.4f}. Retraining recommended.")
+        return True
+
+    """
     Generate a property price prediction.
 
     Input:
@@ -99,6 +126,9 @@ class PredictionEngine:
 
             # Create additional features required by the model
             df = add_features(df)
+
+            # Check for data drift before proceeding
+            self._check_drift(df)
 
             # Apply the preprocessing pipeline
             X = self.preprocessor.transform(df)

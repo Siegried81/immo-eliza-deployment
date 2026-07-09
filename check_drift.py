@@ -64,12 +64,10 @@ def check_drift_report():
         
         print(f"{feature:<25} | {psi_score:<10.4f} | {status}")
 
-    print("=" * 70)
     if total_drift:
         print("ATTENTION: Strong drift detected! Retraining recommended.")
     else:
         print("No significant drift - Model is valid.")
-    print("=" * 70)
 
 if __name__ == "__main__":
     check_drift_report()
