@@ -44,9 +44,7 @@ def check_drift_report():
     
     drift_results = detect_drift(train_df, live_df)
 
-    print("\n" + "="*70)
     print("DRIFT REPORT (PSI - Population Stability Index)")
-    print("="*70)
     print(f"{'Feature':<30} | {'PSI':<10} | {'Status'}")
     print("-" * 70)
 

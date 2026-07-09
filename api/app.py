@@ -1,6 +1,6 @@
+import os
 import sys
 import uvicorn
-import os
 
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
@@ -16,6 +16,7 @@ app = FastAPI(
     version="1.0",
     description="Belgian property price prediction API with XGBoost"
 )
+
 
 class PropertyInput(BaseModel):
     # Location
@@ -53,13 +54,17 @@ class PropertyInput(BaseModel):
             raise ValueError('Total surface cannot be smaller than livable surface')
         return v
 
+
 @app.get("/")
 def health_check():
-    return {"status": "API running"}
+    return "alive"
+
 
 @app.get("/ping")
 def ping():
+    # Used by UptimeRobot to keep the Render free-tier service awake.
     return {"status": "ok", "message": "pong"}
+
 
 @app.post("/predict")
 def predict(property_input: PropertyInput):
@@ -80,16 +85,15 @@ def predict(property_input: PropertyInput):
         }
 
     except ValueError as ve:
-        # Specific validation errors caught here
+        # Specific validation errors caught
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
     except Exception as e:
         import traceback
-        print("--- ERROR DETECTED ---")
+        print("ERROR DETECTED")
         traceback.print_exc()
-        raise HTTPException(
-            status_code=500,
-            detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
-    # For local development, run this from the root with: python -m api.app
+    port = int(os.environ.get("PORT", 8000))
     uvicorn.run("api.app:app", host="0.0.0.0", port=port)
