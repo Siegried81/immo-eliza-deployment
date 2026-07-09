@@ -1,15 +1,14 @@
 import sys
 from pathlib import Path
 
+# Add the project root directory to the Python path BEFORE importing the
+# app, otherwise this insertion has no effect (inserting into sys.path
+# after the import that needs it is too late).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import pytest
 from fastapi.testclient import TestClient
 from api.app import app
-
-"""
-Add the project root directory to the Python path
-to allow importing the FastAPI application.
-"""
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 client = TestClient(app)
 
@@ -20,7 +19,7 @@ class TestHealthCheck:
         assert response.json()["status"] == "API running"
 
 class TestPredict:
-    
+
     """
     Test prediction with valid input data.
     """
@@ -43,10 +42,8 @@ class TestPredict:
             "preschool_distance_m": 500,
             "train_station_distance_m": 800,
             "supermarket_distance_m": 400,
-            "nearest_city": "Brussels",
-            "nearest_city_distance_km": 0
         }
-        
+
         response = client.post("/predict", json=payload)
         assert response.status_code == 200
         assert "prediction" in response.json()
@@ -63,6 +60,6 @@ class TestPredict:
             "property_type": "APARTMENT",
             "livable_surface": 85,
         }
-        
+
         response = client.post("/predict", json=payload)
         assert response.status_code == 422

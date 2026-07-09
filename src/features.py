@@ -1,8 +1,6 @@
 import pandas as pd
 
-
 CURRENT_YEAR = 2026
-
 
 ENERGY_MEAN_BY_STATE = {
     "NEW": 80,
@@ -15,7 +13,6 @@ ENERGY_MEAN_BY_STATE = {
     "TO_DEMOLISH": 300,
 }
 
-
 STATE_MAPPING = {
     "TO_DEMOLISH": 0,
     "TO_RESTORE": 1,
@@ -27,20 +24,14 @@ STATE_MAPPING = {
     "NEW": 7,
 }
 
-
 def add_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Apply all feature engineering used during training and prediction.
     Must be identical for train and inference.
     """
-
     df = df.copy()
 
-
-    # =====================================================
     # Ensure required columns exist
-    # =====================================================
-
     defaults = {
         "property_state": "NORMAL",
         "build_year": CURRENT_YEAR,
@@ -50,25 +41,21 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
         "terrace": 0,
         "swimming_pool": 0,
         "bedroom_count": 1,
-
         "energy_consumption_kWh_m2_year": 0,
-
         "preschool_distance_m": 0,
         "train_station_distance_m": 0,
         "supermarket_distance_m": 0,
     }
 
-
     for column, value in defaults.items():
         if column not in df.columns:
             df[column] = value
 
+    # Fix for missing price_per_m2 during inference
+    if 'price_per_m2' not in df.columns:
+        df['price_per_m2'] = 0
 
-
-    # =====================================================
     # Property state cleaning
-    # =====================================================
-
     df["property_state"] = (
         df["property_state"]
         .fillna("NORMAL")
@@ -76,91 +63,37 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
         .str.upper()
     )
 
-
-
-    # =====================================================
-    # Energy consumption
-    #
-    # If missing or 0:
-    # use mean energy consumption
-    # depending on property state
-    # =====================================================
-
+    # Energy consumption logic
     def replace_energy(row):
-
         energy = row["energy_consumption_kWh_m2_year"]
-
         if pd.isna(energy) or energy == 0:
-
             return ENERGY_MEAN_BY_STATE.get(
                 row["property_state"],
                 ENERGY_MEAN_BY_STATE["NORMAL"]
             )
-
         return energy
 
+    df["energy_consumption_kWh_m2_year"] = df.apply(replace_energy, axis=1)
 
-    df["energy_consumption_kWh_m2_year"] = df.apply(
-        replace_energy,
-        axis=1
-    )
-
-
-
-    # =====================================================
     # Total surface
-    # =====================================================
-
     df["total_surface"] = (
         df["total_surface"]
-        .fillna(
-            df["livable_surface"] * 1.2
-        )
+        .fillna(df["livable_surface"] * 1.2)
     )
 
-
-
-    # =====================================================
     # Property age
-    # =====================================================
+    df["build_year"] = df["build_year"].fillna(CURRENT_YEAR)
+    df["property_age"] = CURRENT_YEAR - df["build_year"]
 
-    df["build_year"] = (
-        df["build_year"]
-        .fillna(CURRENT_YEAR)
-    )
-
-
-    df["property_age"] = (
-        CURRENT_YEAR
-        - df["build_year"]
-    )
-
-
-
-    # =====================================================
     # Swimming pool conversion
-    # =====================================================
+    df["swimming_pool"] = df["swimming_pool"].fillna(0).astype(int)
 
-    df["swimming_pool"] = (
-        df["swimming_pool"]
-        .fillna(0)
-        .astype(int)
-    )
-
-
-
-    # =====================================================
     # Property state encoding
-    # =====================================================
-
     df["property_state_encoded"] = (
         df["property_state"]
         .map(STATE_MAPPING)
-        .fillna(
-            STATE_MAPPING["NORMAL"]
-        )
+        .fillna(STATE_MAPPING["NORMAL"])
         .astype(int)
     )
-
 
     return df

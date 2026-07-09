@@ -6,6 +6,7 @@ import pandas as pd
 from pathlib import Path
 
 from xgboost import XGBRegressor
+from category_encoders import TargetEncoder
 
 from sklearn.model_selection import train_test_split
 from sklearn.compose import ColumnTransformer
@@ -48,6 +49,7 @@ NUMERIC_FEATURES = [
     "preschool_distance_m",
     "train_station_distance_m",
     "supermarket_distance_m",
+    "price_per_m2",
 ]
 
 
@@ -89,7 +91,7 @@ def build_preprocessor():
 
     cat = Pipeline([
         ("imputer", SimpleImputer(strategy="most_frequent")),
-        ("encoder", OneHotEncoder(handle_unknown="ignore"))
+        ("encoder", TargetEncoder())
     ])
 
     return ColumnTransformer([
@@ -103,13 +105,15 @@ Create the XGBoost regression model.
 """
 def build_model():
     return XGBRegressor(
-        n_estimators=1500,
-        learning_rate=0.03,
-        max_depth=5,
+        n_estimators=2000,
+        learning_rate=0.01,
+        max_depth=10,
+        reg_lambda=1.5,
         subsample=0.8,
         colsample_bytree=0.7,
         random_state=42,
-        objective="reg:squarederror"
+        objective="reg:absoluteerror",
+        early_stopping_rounds=50
     )
 
 
@@ -119,6 +123,11 @@ Main training function.
 def train():
     # Load dataset and engineer features
     df = load_data(DATA_PATH)
+
+    # Calculate price_per_m2 as a feature before add_features()
+    df["price_per_m2"] = df["price"] / df["livable_surface"].replace(0, np.nan)
+    df["price_per_m2"] = df["price_per_m2"].fillna(df["price_per_m2"].median())
+
     df = add_features(df)
 
     # Separate input features (X) from the target variable (y)
@@ -135,11 +144,16 @@ def train():
 
     # Preprocess
     preprocessor = build_preprocessor()
-    X_train_p = preprocessor.fit_transform(X_train)
+    X_train_p = preprocessor.fit_transform(X_train, y_train)
+    X_val_p = preprocessor.transform(X_val)
 
     # Train
     model = build_model()
-    model.fit(X_train_p, y_train)
+    model.fit(
+        X_train_p, y_train,
+        eval_set=[(X_val_p, y_val)],
+        verbose=False
+    )
 
     # Save
     os.makedirs(MODEL_DIR, exist_ok=True)
@@ -148,7 +162,7 @@ def train():
 
     print(f"Model saved at {XGB_MODEL_PATH}")
     print(f"Preprocessor saved at {PREPROCESSOR_PATH}")
-    
+
     # Save baseline for drift detection
     TRAINING_BASELINE_PATH.parent.mkdir(exist_ok=True)
     X_train.to_csv(TRAINING_BASELINE_PATH, index=False)

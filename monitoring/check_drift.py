@@ -1,14 +1,25 @@
+import sys
 import pandas as pd
 import json
 from pathlib import Path
+
+# This file lives at repo_root/monitoring/check_drift.py
+BASE_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(BASE_DIR))
+
+# Package-style import (consistent with generate_logs.py) instead of the
+# previous "from monitor import detect_drift", which only worked if this
+# script happened to be run with cwd = monitoring/
 from monitoring.monitor import detect_drift
 
 def check_drift_report():
     """
     Analyze drift between training data and live predictions.
     """
-    logs_file = Path("monitoring/logs.json")
-    baseline_file = Path("data/training_baseline.csv")
+    # Paths resolved from BASE_DIR, not from the current working directory,
+    # so this script works no matter where it's invoked from.
+    logs_file = BASE_DIR / "monitoring" / "logs.json"
+    baseline_file = BASE_DIR / "data" / "training_baseline.csv"
 
     # 1. Load logged predictions
     if not logs_file.exists():
@@ -51,9 +62,9 @@ def check_drift_report():
 
     total_drift = False
     for feature, result_data in drift_results.items():
-        # Extraction de la valeur PSI depuis le dictionnaire
+        # Extract the PSI value from the result dict
         psi_score = result_data["psi"]
-        
+
         if psi_score > 0.25:
             total_drift = True
             status = "🚨 STRONG DRIFT"
@@ -61,7 +72,7 @@ def check_drift_report():
             status = "⚠️  Moderate"
         else:
             status = "✅ OK"
-        
+
         print(f"{feature:<25} | {psi_score:<10.4f} | {status}")
 
     if total_drift:
