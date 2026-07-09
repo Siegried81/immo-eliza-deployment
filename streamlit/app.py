@@ -2,10 +2,18 @@ import os
 import requests
 import streamlit as st
 
-API_URL = os.getenv("API_URL", "http://localhost:8000/predict").strip()
+# Configuration of the API URL (use the environment variable on Render)[cite: 1]
+API_URL = os.getenv("API_URL", "http://localhost:8000").strip()
 
-response = requests.post(f"{API_URL}/predict", json=data)
+# Page configuration[cite: 1]
+st.set_page_config(page_title="Immo Eliza Predictor", page_icon="🏠", layout="wide")
 
+st.title("🏠 Immo Eliza Predictor")
+st.write("Belgian property price prediction using XGBoost")
+
+st.markdown("**Note:** Fields marked with an asterisk (*) are mandatory.")
+
+# Configuration lists
 PROPERTY_TYPES = ["HOUSE", "APARTMENT"]
 PROPERTY_STATES = [
     "NEW", "EXCELLENT", "FULLY_RENOVATED", "UNDER_CONSTRUCTION",
@@ -16,7 +24,6 @@ PROVINCES = [
     "Flemish Brabant", "Walloon Brabant", "Hainaut", "Liège",
     "Limburg", "Luxembourg", "Namur"
 ]
-
 DUTCH_PROVINCES = {
     "Brussels": "Brussel", "Antwerp": "Antwerpen", "East Flanders": "Oost-Vlaanderen",
     "West Flanders": "West-Vlaanderen", "Flemish Brabant": "Vlaams-Brabant",
@@ -24,13 +31,7 @@ DUTCH_PROVINCES = {
     "Limburg": "Limburg", "Luxembourg": "Luxemburg", "Namur": "Namen",
 }
 
-st.set_page_config(page_title="Immo Eliza Predictor", page_icon="🏠", layout="wide")
-
-st.title("🏠 Immo Eliza Predictor")
-st.write("Belgian property price prediction using XGBoost")
-
-st.markdown("**Note:** Fields marked with an asterisk (*) are mandatory.")
-
+# User Interface[cite: 1]
 col1, col2, col3 = st.columns(3)
 
 with col1:
@@ -61,6 +62,7 @@ with col3:
 
 st.divider()
 
+# Prediction logic[cite: 1]
 left, center, right = st.columns([1, 2, 1])
 
 with center:
@@ -80,13 +82,13 @@ with center:
 
         try:
             with st.spinner("Calculating prediction..."):
-                response = requests.post(API_URL, json=payload, timeout=10)
+                # Concatenate /predict to use the dynamic base URL[cite: 1]
+                response = requests.post(f"{API_URL}/predict", json=payload, timeout=10)
 
             if response.status_code == 200:
                 result = response.json()
                 st.success(f"✅ Prediction generated successfully!")
                 st.metric("Estimated Price", f"€ {result['prediction']:,.0f}")
-
             elif response.status_code == 400:
                 error_data = response.json()
                 st.error(f"⚠️ Input Error: {error_data.get('detail', 'Please check your inputs.')}")
