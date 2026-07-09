@@ -3,68 +3,56 @@ import pandas as pd
 import json
 from pathlib import Path
 
-# This file lives at repo_root/monitoring/check_drift.py
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
-# Package-style import (consistent with generate_logs.py) instead of the
-# previous "from monitor import detect_drift", which only worked if this
-# script happened to be run with cwd = monitoring/
 from monitoring.monitor import detect_drift
 
+# Features that exist in both baseline and log inputs
+FEATURES_TO_MONITOR = [
+    "build_year", "bedroom_count", "livable_surface", "total_surface",
+    "garage", "terrace", "swimming_pool", "energy_consumption_kWh_m2_year",
+    "property_state_encoded", "property_age", "preschool_distance_m",
+    "train_station_distance_m", "supermarket_distance_m", "price_per_m2"
+]
+
 def check_drift_report():
-    """
-    Analyze drift between training data and live predictions.
-    """
-    # Paths resolved from BASE_DIR, not from the current working directory,
-    # so this script works no matter where it's invoked from.
     logs_file = BASE_DIR / "monitoring" / "logs.json"
     baseline_file = BASE_DIR / "data" / "training_baseline.csv"
 
-    # 1. Load logged predictions
     if not logs_file.exists():
-        print(f"Error: {logs_file} not found.")
+        print("Error: logs.json not found.")
         return
 
     with open(logs_file, 'r', encoding='utf-8') as f:
         logs = json.load(f)
 
-    if not logs:
-        print("Error: Logs file is empty.")
+    if not logs or len(logs) < 50:
+        print(f"Warning: Only {len(logs)} samples. Need 50+ for reliability.")
         return
 
-    # Extract the 'input' dictionary from each log entry
+    # Load data
     live_df = pd.DataFrame([log['input'] for log in logs])
-    print(f"Successfully loaded {len(live_df)} live predictions.")
-
-    # 2. Load training baseline
-    if not baseline_file.exists():
-        print(f"Error: {baseline_file} not found.")
-        return
-
     train_df = pd.read_csv(baseline_file)
-    print(f"Successfully loaded {len(train_df)} training samples.")
 
-    # 3. Detect drift
-    print("Calculating PSI values...")
+    # Filter to common features
+    live_df = live_df[FEATURES_TO_MONITOR]
+    train_df = train_df[FEATURES_TO_MONITOR]
+
+    print(f"Loaded {len(live_df)} live vs {len(train_df)} training samples.")
+    print("Calculating PSI...")
+    
     drift_results = detect_drift(train_df, live_df)
-
-    # 4. Report results
-    if not drift_results:
-        print("No numerical features found to compare.")
-        return
 
     print("\n" + "="*70)
     print("DRIFT REPORT (PSI - Population Stability Index)")
     print("="*70)
-    print(f"{'Feature':<25} | {'PSI':<10} | {'Status'}")
+    print(f"{'Feature':<30} | {'PSI':<10} | {'Status'}")
     print("-" * 70)
 
     total_drift = False
     for feature, result_data in drift_results.items():
-        # Extract the PSI value from the result dict
         psi_score = result_data["psi"]
-
         if psi_score > 0.25:
             total_drift = True
             status = "🚨 STRONG DRIFT"
@@ -72,13 +60,12 @@ def check_drift_report():
             status = "⚠️  Moderate"
         else:
             status = "✅ OK"
-
-        print(f"{feature:<25} | {psi_score:<10.4f} | {status}")
+        print(f"{feature:<30} | {psi_score:<10.4f} | {status}")
 
     if total_drift:
-        print("ATTENTION: Strong drift detected! Retraining recommended.")
+        print("\nATTENTION: Strong drift detected! Retraining recommended.")
     else:
-        print("No significant drift - Model is valid.")
+        print("\nNo significant drift - Model is valid.")
 
 if __name__ == "__main__":
     check_drift_report()

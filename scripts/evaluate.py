@@ -5,12 +5,9 @@ import pandas as pd
 from pathlib import Path
 import xgboost as xgb
 
-# This script lives at repo_root/scripts/evaluate.py
 BASE_DIR = Path(__file__).resolve().parent.parent
 SRC_DIR = BASE_DIR / "src"
 
-# Add src/ directly to sys.path so "features" imports the same way
-# api/predict.py does, instead of requiring "from src.features import ..."
 sys.path.insert(0, str(SRC_DIR))
 from features import add_features
 
