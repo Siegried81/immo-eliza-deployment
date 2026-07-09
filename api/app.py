@@ -2,75 +2,24 @@ import sys
 import uvicorn
 import os
 
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import FastAPI, HTTPException, status
+from pydantic import BaseModel, Field, field_validator
 from typing import Literal
 from monitoring.monitor import log_prediction
 from api.predict import engine
 
-"""
-Add the project root directory to the Python path.
-This allows importing internal project modules.
-"""
-sys.path.append(
-    os.path.dirname(
-        os.path.dirname(
-            os.path.abspath(__file__)
-        )
-    )
-)
+# Add project root to path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-
-"""
-Initialize the FastAPI application.
-
-This API provides Belgian property price predictions
-using a trained XGBoost regression model.
-"""
 app = FastAPI(
     title="Immo Eliza Price Predictor API",
     version="1.0",
-    description="Belgian property price prediction API using XGBoost"
+    description="Belgian property price prediction API with XGBoost"
 )
 
-
-"""
-List of accepted property states.
-These values must match the categories used during model training.
-"""
-PROPERTY_STATES = [
-    "NEW",
-    "EXCELLENT",
-    "FULLY_RENOVATED",
-    "UNDER_CONSTRUCTION",
-    "NORMAL",
-    "TO_RENOVATE",
-    "TO_RESTORE",
-    "TO_DEMOLISH"
-]
-
-
-"""
-List of supported property types.
-"""
-PROPERTY_TYPES = [
-    "HOUSE",
-    "APARTMENT"
-]
-
-
-"""
-Define the expected input structure for property predictions.
-
-Pydantic validates:
-- data types
-- allowed values
-- minimum and maximum constraints
-"""
 class PropertyInput(BaseModel):
-
     # Location
-    postcode: int = Field(..., ge=1000, le=9999)
+    postcode: int = Field(..., ge=1000, le=9999, description="Must be between 1000 and 9999")
     province: str
     city: str
 
@@ -81,7 +30,7 @@ class PropertyInput(BaseModel):
         "NORMAL", "TO_RENOVATE", "TO_RESTORE", "TO_DEMOLISH"
     ] = "NORMAL"
 
-    livable_surface: int = Field(..., gt=0)
+    livable_surface: int = Field(..., gt=0, description="Livable surface must be greater than 0")
     total_surface: int = Field(0, ge=0)
     bedroom_count: int = Field(1, ge=0)
     build_year: int = Field(2000, ge=1800, le=2026)
@@ -96,54 +45,51 @@ class PropertyInput(BaseModel):
     train_station_distance_m: int = Field(0, ge=0)
     supermarket_distance_m: int = Field(0, ge=0)
 
-    # Additional features
-    nearest_city: str = ""
-    nearest_city_distance_km: int = Field(0, ge=0)
+    # Cross-field validation to ensure logical data
+    @field_validator('total_surface')
+    @classmethod
+    def total_surface_must_be_ge_livable(cls, v, info):
+        if 'livable_surface' in info.data and v > 0 and v < info.data['livable_surface']:
+            raise ValueError('Total surface cannot be smaller than livable surface')
+        return v
 
-
-"""
-Health check endpoint.
-"""
 @app.get("/")
 def health_check():
     return {"status": "API running"}
 
-
-"""
-Keep-Alive endpoint.
-Used by external services (like UptimeRobot) to prevent the API from sleeping.
-"""
 @app.get("/ping")
 def ping():
-    return {"status": "alive"}
+    return {"status": "ok", "message": "pong"}
 
-
-"""
-Prediction endpoint.
-"""
 @app.post("/predict")
 def predict(property_input: PropertyInput):
     try:
-        # Convert the validated input object into a dictionary
         data = property_input.model_dump()
 
-        # Generate the property price prediction
+        # Generate prediction
         prediction = engine.predict(data)
 
-        # Store input data and prediction result for monitoring
+        # Log for monitoring
         log_prediction(data, prediction)
 
         return {
             "prediction": round(float(prediction), 2),
             "currency": "EUR",
-            "status": "success"
+            "status": "success",
+            "message": "Prediction generated successfully"
         }
 
+    except ValueError as ve:
+        # Specific validation errors caught here
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
     except Exception as e:
+        import traceback
+        print("--- ERROR DETECTED ---")
+        traceback.print_exc()
         raise HTTPException(
-            status_code=400,
-            detail=f"Prediction error: {str(e)}"
-        )
+            status_code=500,
+            detail=str(e))
+
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("app:app", host="0.0.0.0", port=port)
+    # For local development, run this from the root with: python -m api.app
+    uvicorn.run("api.app:app", host="0.0.0.0", port=port)
