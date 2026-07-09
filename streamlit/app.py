@@ -6,6 +6,7 @@ API_URL = os.getenv(
     "API_URL",
     "http://localhost:8000/predict"
 ).strip()
+response = requests.post(f"{API_BASE_URL}/predict", json=data)
 
 PROPERTY_TYPES = ["HOUSE", "APARTMENT"]
 PROPERTY_STATES = [
