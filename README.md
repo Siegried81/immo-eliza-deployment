@@ -401,11 +401,11 @@ Data drift is measured using the **Population Stability Index (PSI)**.
 | Supermarket Distance | 2.1613 | 🚨 Strong Drift |
 | Price per m² | 0.3889 | 🚨 Strong Drift |
 
-### 📌 Conclusion
+### 📌 Interpretation
 
-The drift analysis highlights significant changes between production data and the original training dataset, especially for property characteristics and location-related features.  
-Although the prediction service remains operational, these distribution shifts may reduce model reliability over time.  
-Regular monitoring and future retraining with more recent real-estate data are therefore recommended to maintain prediction accuracy.
+The drift analysis reveals significant distribution changes between production and training data, especially for property characteristics and location-related features.
+
+These observations highlight the importance of continuous monitoring and future retraining to maintain model reliability.
 
 ---
 
@@ -522,66 +522,28 @@ Passing all tests confirms that the deployed application behaves as expected.
 
 # 📌 Final Conclusion
 
-This project demonstrates the complete deployment lifecycle of a machine learning regression model.
+This project demonstrates the complete deployment lifecycle of a machine learning regression model, from data preparation and model serving to monitoring and maintenance.
 
-A trained **XGBoost** model was deployed behind a **FastAPI** REST API and connected to an interactive **Streamlit** web application, allowing users to estimate Belgian real estate prices in real time.
+A trained **XGBoost regression model** was successfully deployed behind a **FastAPI REST API** and integrated with a **Streamlit web application**, allowing users to obtain real-time Belgian real estate price estimations based on property characteristics.
 
-Beyond simply serving predictions, the project incorporates several software engineering and MLOps practices that improve reliability, maintainability, and production readiness.
+Beyond simply exposing predictions, the project implements several production-oriented practices to improve reliability and maintainability:
 
-## ✅ Implemented Features
+- 🚀 Deployment of a scalable prediction API using FastAPI
+- 🎨 Development of an interactive user interface with Streamlit
+- 🧪 Automated API and prediction testing with pytest
+- ✔️ Input validation and error handling with Pydantic
+- 📦 Model serialization and reproducible inference through a complete pipeline
+- 📊 Prediction logging for future analysis
+- ❤️ Availability monitoring through a dedicated health endpoint and UptimeRobot
+- 📉 Data drift detection using the Population Stability Index (PSI)
 
-- 🚀 REST API deployment with FastAPI
-- 🎨 Interactive web interface with Streamlit
-- 🧪 Automated testing using pytest
-- ✔️ Input validation with Pydantic
-- 📊 Logging of production predictions
-- ❤️ Dedicated `/ping` health endpoint monitored by UptimeRobot
-- 📉 Population Stability Index (PSI) monitoring
-- 🔍 Automatic drift detection
-- 🔄 Retraining recommendations based on monitoring results
+The model evaluation showed that the system provides reliable predictions for the majority of residential properties. However, the analysis also highlighted the difficulty of predicting ultra-luxury properties, where limited training examples force the model to extrapolate beyond the range of data it has learned from.
 
----
+The monitoring analysis demonstrated the importance of continuously tracking production data. Several feature distributions have shifted compared with the original training dataset, showing that model performance can degrade over time if the system is not regularly reviewed and updated.
 
-## 📈 Key Findings
+These findings emphasize that deploying a machine learning model is not the final step of an ML project. A reliable production system requires continuous monitoring, automated testing, data validation, and periodic retraining to remain accurate as real-world data evolves.
 
-Re-running the evaluation and drift analysis highlighted two important observations.
-
-### 🏰 Luxury Properties
-
-The headline error metrics are largely driven by a handful of ultra-luxury properties (€5M+) that lie well outside the model's training distribution.
-
-The model is therefore **not fundamentally inaccurate**; it is simply being asked to extrapolate far beyond the range of data it has learned from.
-
-Segmenting the evaluation—or even training a dedicated luxury-property model—would provide a much more representative view of real-world performance.
-
----
-
-### 📉 Drift Monitoring
-
-The drift report currently monitors:
-
-- two redundant variables (`build_year` and `property_age`), and
-- one variable that no longer feeds the model (`price_per_m2`), which was removed because of target leakage.
-
-While this does not affect the deployment itself, simplifying the monitored feature set would make the PSI report easier to interpret and more actionable.
-
----
-
-## 🎯 Final Remarks
-
-This project demonstrates that deploying a machine learning model is only one step in the production lifecycle.
-
-A reliable ML system also requires:
-
-- continuous monitoring,
-- automated testing,
-- robust data validation,
-- regular retraining,
-- and periodic verification that monitoring metrics remain aligned with the model's actual inputs.
-
-Together, these practices help ensure that predictions remain reliable as production data evolves over time.
-
-Overall, the project delivers a complete end-to-end deployment pipeline—from model serving and user interaction to monitoring, testing, and maintenance—following modern software engineering and MLOps best practices.
+Overall, this project delivers a complete end-to-end machine learning deployment pipeline, combining **data science, software engineering, and MLOps practices** to transform a trained model into a reliable and maintainable application.
 
 ---
 
