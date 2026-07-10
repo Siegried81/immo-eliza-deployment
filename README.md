@@ -28,6 +28,7 @@ immo-eliza-deployment/
 │   ├── __init__.py
 │   ├── app.py
 │   └── predict.py
+├── models   
 ├── monitoring/
 │   ├── __init__.py
 │   ├── check_drift.py
@@ -166,7 +167,7 @@ The Streamlit interface allows users to enter property characteristics and obtai
 
 The FastAPI backend provides the REST API used for predictions.
 
-➡️ https://immo-eliza-a.onrender.com
+➡️ https://immo-eliza-ui.onrender.com
 
 The interactive API documentation is available through Swagger UI:
 
@@ -179,7 +180,7 @@ The interactive API documentation is available through Swagger UI:
 ## 1. Clone the repository
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/Siegried81/immo-eliza-deployment.git
 cd immo-eliza-deployment
 ```
 
