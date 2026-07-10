@@ -11,8 +11,8 @@ from monitoring.monitor import detect_drift
 FEATURES_TO_MONITOR = [
     "build_year", "bedroom_count", "livable_surface", "total_surface",
     "garage", "terrace", "swimming_pool", "energy_consumption_kWh_m2_year",
-    "property_state_encoded", "property_age", "preschool_distance_m",
-    "train_station_distance_m", "supermarket_distance_m", "price_per_m2"
+    "property_state_encoded",
+    "preschool_distance_m", "train_station_distance_m", "supermarket_distance_m"
 ]
 
 def check_drift_report():

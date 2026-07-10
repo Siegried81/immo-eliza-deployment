@@ -2,10 +2,10 @@ import os
 import requests
 import streamlit as st
 
-# Configuration of the API URL (use the environment variable on Render)[cite: 1]
+# Configuration of the API URL 
 API_URL = os.getenv("API_URL", "http://localhost:8000").strip()
 
-# Page configuration[cite: 1]
+# Page configuration
 st.set_page_config(page_title="Immo Eliza Predictor", page_icon="🏠", layout="wide")
 
 st.title("🏠 Immo Eliza Predictor")
@@ -31,7 +31,7 @@ DUTCH_PROVINCES = {
     "Limburg": "Limburg", "Luxembourg": "Luxemburg", "Namur": "Namen",
 }
 
-# User Interface[cite: 1]
+# User Interface
 col1, col2, col3 = st.columns(3)
 
 with col1:
@@ -62,7 +62,7 @@ with col3:
 
 st.divider()
 
-# Prediction logic[cite: 1]
+# Prediction logic
 left, center, right = st.columns([1, 2, 1])
 
 with center:
@@ -89,6 +89,10 @@ with center:
                 result = response.json()
                 st.success(f"✅ Prediction generated successfully!")
                 st.metric("Estimated Price", f"€ {result['prediction']:,.0f}")
+
+                if result.get("segment") == "luxury":
+                    st.caption("🏛️ This property was routed to the luxury-segment model, trained on a smaller pool of high-end listings.")
+
                 st.caption(
                     "ℹ️ This is a model-generated estimate, not a formal valuation. "
                     "It can differ from the actual market value, especially for atypical "

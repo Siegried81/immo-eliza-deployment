@@ -1,4 +1,5 @@
 import os
+import json
 import joblib
 import numpy as np
 import pandas as pd
@@ -22,8 +23,11 @@ MODEL_DIR = BASE_DIR / "models"
 XGB_MODEL_PATH = MODEL_DIR / "best_XGBoost.json"
 TRAINING_BASELINE_PATH = BASE_DIR / "data" / "training_baseline.csv"
 PREPROCESSOR_PATH = MODEL_DIR / "preprocessor.joblib"
-# CHANGED: single deployable artifact bundling preprocessor + model together.
 PIPELINE_PATH = MODEL_DIR / "pipeline.joblib"
+PIPELINE_LOWER_PATH = MODEL_DIR / "pipeline_lower.joblib"
+PIPELINE_UPPER_PATH = MODEL_DIR / "pipeline_upper.joblib"
+PIPELINE_LUXURY_PATH = MODEL_DIR / "pipeline_luxury.joblib"
+LUXURY_THRESHOLD_PATH = MODEL_DIR / "luxury_threshold.json"
 
 
 """
@@ -36,7 +40,7 @@ TARGET = "price"
 List of numerical features used by the machine learning model.
 'nearest_city_distance_km' has been removed to reduce drift.
 'price_per_m2' has been removed: it was computed from the target (price),
-which is data leakage and is unavailable at inference time (always 0 in production).
+which is data leakage.
 """
 NUMERIC_FEATURES = [
     "build_year",
@@ -65,26 +69,6 @@ CATEGORICAL_FEATURES = [
     "property_state",
 ]
 
-
-"""
-CHANGED (drift/luxury-segment fix) — REVERTED after testing:
-An earlier version of this file widened QUANTILE_UPPER to 0.999 to let more
-luxury properties into training. In practice this made things worse across
-the board (MAPE went from 16.24% to 16.54%, bias from 5.64% to 6.89%
-overestimation) without meaningfully fixing luxury predictions -- there
-simply aren't enough high-end properties in the dataset for the model to
-learn a reliable pattern from them, so they just added noisy, high-leverage
-signal that hurt the mass-market segment too.
-
-QUANTILE_LOWER / QUANTILE_UPPER are kept as the single, explicit source of
-truth for outlier trimming (replacing the old load_data()-only hard cap,
-which was redundant with this same percentile logic and had no effect when
-removed). Bounds are back to the original 1st-99th percentile, which gave
-the best measured results. Predicting the ultra-luxury segment reliably
-would need either a lot more high-end training examples, or a separate
-model trained specifically for that segment -- not just a wider clip on
-this dataset.
-"""
 QUANTILE_LOWER = 0.01
 QUANTILE_UPPER = 0.99
 
@@ -127,8 +111,8 @@ def build_preprocessor():
 """
 Create the XGBoost regression model.
 """
-def build_model():
-    return XGBRegressor(
+def build_model(objective="reg:absoluteerror", quantile_alpha=None):
+    params = dict(
         n_estimators=2000,
         learning_rate=0.01,
         max_depth=10,
@@ -136,9 +120,12 @@ def build_model():
         subsample=0.8,
         colsample_bytree=0.7,
         random_state=42,
-        objective="reg:absoluteerror",
+        objective=objective,
         early_stopping_rounds=50
     )
+    if quantile_alpha is not None:
+        params["quantile_alpha"] = quantile_alpha
+    return XGBRegressor(**params)
 
 
 """
@@ -179,10 +166,6 @@ def train():
     model.save_model(XGB_MODEL_PATH)
     joblib.dump(preprocessor, PREPROCESSOR_PATH)
 
-    # CHANGED: assemble the already-fitted preprocessor + model into a single
-    # sklearn Pipeline object. Since both steps are already fitted, this Pipeline
-    # doesn't need to be re-fit -- it's just a convenient single-file container
-    # that predict.py can load and call .predict() on directly.
     pipeline = Pipeline(steps=[
         ("preprocessor", preprocessor),
         ("model", model),
@@ -192,6 +175,46 @@ def train():
     print(f"Model saved at {XGB_MODEL_PATH}")
     print(f"Preprocessor saved at {PREPROCESSOR_PATH}")
     print(f"Combined pipeline saved at {PIPELINE_PATH}")
+
+
+    lower_model = build_model(objective="reg:quantileerror", quantile_alpha=0.1)
+    lower_model.fit(X_train_p, y_train, eval_set=[(X_val_p, y_val)], verbose=False)
+    upper_model = build_model(objective="reg:quantileerror", quantile_alpha=0.9)
+    upper_model.fit(X_train_p, y_train, eval_set=[(X_val_p, y_val)], verbose=False)
+
+    joblib.dump(Pipeline([("preprocessor", preprocessor), ("model", lower_model)]), PIPELINE_LOWER_PATH)
+    joblib.dump(Pipeline([("preprocessor", preprocessor), ("model", upper_model)]), PIPELINE_UPPER_PATH)
+    print(f"Prediction interval models saved at {PIPELINE_LOWER_PATH} / {PIPELINE_UPPER_PATH}")
+    print("These give a P10-P90 range around the point estimate; the app should treat any prediction")
+    print("with a very wide P10-P90 gap as low-confidence.")
+
+    full_df = add_features(pd.read_json(DATA_PATH))
+    luxury_threshold = full_df["price"].quantile(QUANTILE_UPPER)
+    luxury_df = full_df[full_df["price"] > luxury_threshold]
+
+    with open(LUXURY_THRESHOLD_PATH, "w") as f:
+        json.dump({"luxury_threshold": float(luxury_threshold), "luxury_model_available": len(luxury_df) >= 30}, f)
+
+    if len(luxury_df) >= 30:
+        X_lux = luxury_df.drop(columns=[TARGET])
+        y_lux = np.log1p(luxury_df[TARGET])
+        X_lux_train, X_lux_val, y_lux_train, y_lux_val = train_test_split(
+            X_lux, y_lux, test_size=0.2, random_state=42
+        )
+        luxury_preprocessor = build_preprocessor()
+        X_lux_train_p = luxury_preprocessor.fit_transform(X_lux_train, y_lux_train)
+        X_lux_val_p = luxury_preprocessor.transform(X_lux_val)
+
+        luxury_model = build_model()
+        luxury_model.fit(X_lux_train_p, y_lux_train, eval_set=[(X_lux_val_p, y_lux_val)], verbose=False)
+
+        luxury_pipeline = Pipeline([("preprocessor", luxury_preprocessor), ("model", luxury_model)])
+        joblib.dump(luxury_pipeline, PIPELINE_LUXURY_PATH)
+        print(f"Luxury-segment pipeline saved at {PIPELINE_LUXURY_PATH} "
+              f"(trained on {len(luxury_df)} properties above €{luxury_threshold:,.0f})")
+    else:
+        print(f"Skipped luxury-segment model: only {len(luxury_df)} properties above €{luxury_threshold:,.0f} "
+              f"(need at least 30). Gather more high-end listings before training this model.")
 
     # Save baseline for drift detection
     TRAINING_BASELINE_PATH.parent.mkdir(exist_ok=True)

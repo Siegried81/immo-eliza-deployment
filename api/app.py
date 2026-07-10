@@ -4,7 +4,7 @@ import uvicorn
 
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
-from typing import Literal
+from typing import Literal, Optional
 from monitoring.monitor import log_prediction
 from api.predict import engine
 
@@ -71,18 +71,25 @@ def predict(property_input: PropertyInput):
     try:
         data = property_input.model_dump()
 
-        # Generate prediction
-        prediction = engine.predict(data)
+        # Generate prediction. engine.predict() returns a dict:
+        result = engine.predict(data)
 
         # Log for monitoring
-        log_prediction(data, prediction)
+        log_prediction(data, result["prediction"])
 
-        return {
-            "prediction": round(float(prediction), 2),
+        response = {
+            "prediction": round(float(result["prediction"]), 2),
             "currency": "EUR",
             "status": "success",
-            "message": "Prediction generated successfully"
+            "message": "Prediction generated successfully",
+            "segment": result.get("segment", "standard"),
         }
+        # Only included when the interval models are available.
+        if result.get("lower") is not None and result.get("upper") is not None:
+            response["lower"] = round(float(result["lower"]), 2)
+            response["upper"] = round(float(result["upper"]), 2)
+
+        return response
 
     except ValueError as ve:
         # Specific validation errors caught
