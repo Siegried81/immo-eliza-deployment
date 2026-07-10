@@ -45,8 +45,9 @@ monitoring/logs.json
 
 
 data/
+models/
 *.csv
-logs.json
+*.json
 
 .docker/
 

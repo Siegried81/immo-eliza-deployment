@@ -18,8 +18,7 @@ def evaluate_model(json_path):
     """
         Loads a pre-trained machine learning pipeline and evaluates its performance 
         against a dataset of real estate properties.
-        Args: json_path (str or Path): The file path to the cleaned JSON dataset 
-                containing 'price' and property features.
+        Args: json_path
         Returns: tuple: (predictions, actual_prices) where predictions are the model's 
                 estimated prices and actual_prices are the ground truth values.
         Raises: FileNotFoundError: If the pipeline file is missing at the expected location.
@@ -27,7 +26,7 @@ def evaluate_model(json_path):
     if not PIPELINE_PATH.exists():
         raise FileNotFoundError(f"Pipeline not found at: {PIPELINE_PATH}")
 
-    pipeline = joblib.load(PIPELINE_PATH)   # <-- cette ligne doit être présente
+    pipeline = joblib.load(PIPELINE_PATH)   
 
     df = pd.read_json(json_path)
     actual_prices = df["price"].values
