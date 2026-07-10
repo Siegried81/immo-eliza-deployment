@@ -6,7 +6,7 @@ This project is the deployment phase of the **Immo Eliza Machine Learning** proj
 
 The objective is to make a trained machine learning model available through a REST API and a user-friendly web interface.
 
-The application predicts the selling price of residential properties in Belgium using property characteristics provided by the user.
+The application predicts the selling price of residential properties in Belgium using property characteristics collected from real-estate listings scraped from the Immovlan website.
 
 The deployment includes:
 
@@ -34,7 +34,6 @@ immo-eliza-deployment/
 │   ├── generate_logs.py
 │   ├── metrics.py
 │   ├── monitor.py
-│   └── logs.json
 ├── scripts/
 │   ├── evaluate.py
 │   └── predict_cli.py
@@ -47,10 +46,7 @@ immo-eliza-deployment/
 │   ├── __init__.py
 │   └── app.py
 ├── tests/
-│   ├── prediction1.png
-│   ├── prediction2.png
 │   ├── test_app.py
-│   └── UptimeRobot.png
 ├── .gitignore
 ├── docker-compose.yml
 └── requirements.txt
@@ -89,7 +85,7 @@ Standalone evaluation script that loads `models/pipeline.joblib` and scores it a
 - RMSE
 - MAPE
 - Bias direction (over/under-estimation)
-- The 10 worst individual prediction errors
+- The 3 worst individual prediction errors (it was the same results for 10)
 
 Useful for spotting where the model struggles the most.
 
@@ -150,71 +146,42 @@ Defines and orchestrates the multi-container setup running both the FastAPI back
 
 # 🚀 Running the Application
 
-The application can be launched either manually (development mode) or using Docker (recommended).
-
-## Method 1 — Docker Compose (Recommended)
-
-Docker Compose runs both the FastAPI backend and the Streamlit frontend inside isolated containers.
-
-### What is Docker Compose?
-
-Docker Compose is a tool used to define and run multi-container Docker applications.
-
-It reads the `docker-compose.yml` file and automatically starts all required services while ensuring they can communicate with each other.
-
-### Launch the application
-
-From the root directory of the project, run:
-
-```bash
-docker compose up --build
-```
-
-Docker will:
-
-- build the containers,
-- install all dependencies,
-- launch both services.
-
-The application will then be available at:
-
-```
-http://localhost:8501
-```
+The application is available both online through deployed services and locally for development purposes.
 
 ---
 
-## Method 2 — Manual Execution (Development)
+## 🌍 Online Deployment
 
-### 1. Install dependencies
+The deployed application can be accessed directly through the following links:
 
-```bash
-pip install -r requirements.txt
-```
+### 🎨 Streamlit User Interface
 
-### 2. Start the API
+The Streamlit interface allows users to enter property characteristics and obtain an estimated selling price.
 
-Open a first terminal and run:
-
-```bash
-uvicorn api.app:app --host 0.0.0.0 --port 8000
-```
-
-### 3. Start Streamlit
-
-Open a second terminal and run:
-
-```bash
-streamlit run streamlit/app.py
-```
-
-Open your browser at:
-
-```
-http://localhost:8501
-```
+➡️ https://immo-eliza-deployment-sieg.streamlit.app
 
 ---
+
+### 🚀 FastAPI Backend
+
+The FastAPI backend provides the REST API used for predictions.
+
+➡️ https://immo-eliza-a.onrender.com
+
+The interactive API documentation is available through Swagger UI:
+
+➡️ https://immo-eliza-ui.onrender.com/docs
+
+---
+
+# 💻 Local Execution
+
+## 1. Clone the repository
+
+```bash
+git clone <repository-url>
+cd immo-eliza-deployment
+
 
 # 🛡️ Reliability & Uptime Monitoring
 
@@ -349,32 +316,6 @@ Without representative examples of luxury properties, the model simply has no ba
 
 ---
 
-## 🧪 Tested and Rejected
-
-Increasing
-
-```python
-QUANTILE_UPPER = 0.999
-```
-
-was tested but produced worse results:
-
-| Metric | Original (0.99) | New (0.999) |
-|---------|----------------:|------------:|
-| MAPE | **16.24%** | **16.54%** |
-| Bias | **5.64%** | **6.89%** |
-
-Luxury predictions remained poor while overall performance degraded.
-
-This confirms that simply widening the clipping threshold is **not** an effective solution.
-
-Reliable predictions for high-end properties would instead require:
-
-- substantially more luxury listings,
-- or a dedicated luxury-property model.
-
----
-
 # 🚀 Future Improvements
 
 Several improvements could further increase the reliability of the deployment.
@@ -396,40 +337,6 @@ This prevents a handful of extreme outliers from dominating the global metrics.
 Testing confirmed that simply increasing `QUANTILE_UPPER` does not improve predictions for expensive properties.
 
 A dedicated model trained specifically on luxury listings—or a significantly larger luxury dataset—would likely perform much better.
-
----
-
-### 📈 Add prediction intervals
-
-Instead of returning only a point estimate, provide a confidence interval using:
-
-- Quantile Regression, or
-- Conformal Prediction.
-
-This would allow users to understand the uncertainty associated with each prediction.
-
----
-
-### 🔄 Retrain using more recent data
-
-The drift analysis indicates significant distribution shifts in several important variables, including:
-
-- `property_state_encoded`
-- `energy_consumption`
-- distance-related features
-
-Retraining on newer real-estate data should therefore be prioritized.
-
----
-
-### 🧹 Simplify the monitored features
-
-The monitoring report currently contains redundant information.
-
-Possible improvements include:
-
-- removing `property_age`, which duplicates `build_year`,
-- excluding `price_per_m2` from PSI monitoring since it is no longer a model input.
 
 ---
 
@@ -465,26 +372,6 @@ The average bias reported above **does not apply** to this segment, where errors
 
 ---
 
-## 💡 Recommendation
-
-These limitations should be communicated in two places.
-
-### In this README
-
-This documentation helps developers and evaluators understand the model's actual strengths and weaknesses.
-
-### In the Streamlit application
-
-A short note displayed next to each prediction would improve transparency, for example:
-
-> *"This estimate is generated by a machine learning model and may differ from the actual market value, particularly for atypical or very high-end properties. Historically, predictions have tended to run approximately 5–6% above the eventual value on average."*
-
-For properties lying well outside the training distribution, the application could display a stronger warning such as:
-
-> *"This property falls outside the range used during model training. The prediction should therefore be interpreted with caution."*
-
----
-
 # 📉 Drift Analysis
 
 Monitoring compares **8,000 synthetic production predictions** against the **10,802 samples** used during model training using `monitoring/check_drift.py`.
@@ -513,6 +400,12 @@ Data drift is measured using the **Population Stability Index (PSI)**.
 | Train Station Distance | 3.0964 | 🚨 Strong Drift |
 | Supermarket Distance | 2.1613 | 🚨 Strong Drift |
 | Price per m² | 0.3889 | 🚨 Strong Drift |
+
+### 📌 Conclusion
+
+The drift analysis highlights significant changes between production data and the original training dataset, especially for property characteristics and location-related features.  
+Although the prediction service remains operational, these distribution shifts may reduce model reliability over time.  
+Regular monitoring and future retraining with more recent real-estate data are therefore recommended to maintain prediction accuracy.
 
 ---
 
@@ -543,13 +436,7 @@ Two observations deserve attention.
 
 `build_year` and `property_age` always produce the exact same PSI value (**0.9734**).
 
-This is expected because:
-
-```text
-property_age = 2026 - build_year
-```
-
-Monitoring both variables is therefore redundant.
+This is expected, so monitoring both variables is redundant.
 
 ---
 

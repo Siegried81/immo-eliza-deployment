@@ -57,7 +57,7 @@ class PropertyInput(BaseModel):
 
 @app.get("/")
 def health_check():
-    return "alive"
+    return {"status": "API alive"}
 
 
 @app.get("/ping")

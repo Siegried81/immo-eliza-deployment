@@ -3,23 +3,34 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import pytest
 from fastapi.testclient import TestClient
+
 from api.app import app
+
 
 client = TestClient(app)
 
+
 class TestHealthCheck:
+    """
+    Test API health endpoint.
+    """
+
     def test_health_check_success(self):
         response = client.get("/")
+
         assert response.status_code == 200
-        assert response.json()["status"] == "API running"
+
+        data = response.json()
+
+        assert data["status"] == "API alive"
+
 
 class TestPredict:
+    """
+    Test prediction endpoint with valid input data.
+    """
 
-    """
-    Test prediction with valid input data.
-    """
     def test_predict_valid_input(self):
         payload = {
             "postcode": 1000,
@@ -42,13 +53,20 @@ class TestPredict:
         }
 
         response = client.post("/predict", json=payload)
+
         assert response.status_code == 200
-        assert "prediction" in response.json()
-        assert response.json()["currency"] == "EUR"
+
+        data = response.json()
+
+        assert "prediction" in data
+        assert data["currency"] == "EUR"
+
 
     """
-    Test prediction with an invalid postal code to trigger validation error.
+    Test prediction endpoint with invalid input data.
+    Invalid postcode should trigger validation error.
     """
+
     def test_predict_invalid_postcode(self):
         payload = {
             "postcode": 999,
@@ -59,4 +77,5 @@ class TestPredict:
         }
 
         response = client.post("/predict", json=payload)
+
         assert response.status_code == 422
