@@ -89,6 +89,12 @@ with center:
                 result = response.json()
                 st.success(f"✅ Prediction generated successfully!")
                 st.metric("Estimated Price", f"€ {result['prediction']:,.0f}")
+                st.caption(
+                    "ℹ️ This is a model-generated estimate, not a formal valuation. "
+                    "It can differ from the actual market value, especially for atypical "
+                    "or very high-end properties, and has historically run slightly above "
+                    "eventual sale prices on average."
+                )
             elif response.status_code == 400:
                 error_data = response.json()
                 st.error(f"⚠️ Input Error: {error_data.get('detail', 'Please check your inputs.')}")

@@ -51,12 +51,6 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
         if column not in df.columns:
             df[column] = value
 
-    # CHANGED: removed the "price_per_m2 default to 0" block.
-    # This feature was dropped from the model entirely (see train.py) because
-    # it was computed from the target price at training time -> data leakage,
-    # and was always 0 at inference, which was very likely the main driver
-    # of the extreme PSI drift previously reported on this feature.
-
     # Property state cleaning
     df["property_state"] = (
         df["property_state"]
