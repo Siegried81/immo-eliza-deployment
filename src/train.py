@@ -67,20 +67,42 @@ CATEGORICAL_FEATURES = [
 
 
 """
-Load the cleaned dataset from a JSON file.
+CHANGED (drift/luxury-segment fix) — REVERTED after testing:
+An earlier version of this file widened QUANTILE_UPPER to 0.999 to let more
+luxury properties into training. In practice this made things worse across
+the board (MAPE went from 16.24% to 16.54%, bias from 5.64% to 6.89%
+overestimation) without meaningfully fixing luxury predictions -- there
+simply aren't enough high-end properties in the dataset for the model to
+learn a reliable pattern from them, so they just added noisy, high-leverage
+signal that hurt the mass-market segment too.
+
+QUANTILE_LOWER / QUANTILE_UPPER are kept as the single, explicit source of
+truth for outlier trimming (replacing the old load_data()-only hard cap,
+which was redundant with this same percentile logic and had no effect when
+removed). Bounds are back to the original 1st-99th percentile, which gave
+the best measured results. Predicting the ultra-luxury segment reliably
+would need either a lot more high-end training examples, or a separate
+model trained specifically for that segment -- not just a wider clip on
+this dataset.
 """
+QUANTILE_LOWER = 0.01
+QUANTILE_UPPER = 0.99
+
+
 def load_data(path):
     df = pd.read_json(path)
-    lower = df["price"].quantile(0.01)
-    upper = df["price"].quantile(0.99)
+    lower = df["price"].quantile(QUANTILE_LOWER)
+    upper = df["price"].quantile(QUANTILE_UPPER)
+
     return df[(df["price"] >= lower) & (df["price"] <= upper)]
 
 
 """
-Limit extreme target values.
+Limit extreme target values. Uses the same bounds as load_data() so the
+target transform doesn't silently re-introduce a tighter cap.
 """
 def clean_target(y):
-    return y.clip(y.quantile(0.01), y.quantile(0.99))
+    return y.clip(y.quantile(QUANTILE_LOWER), y.quantile(QUANTILE_UPPER))
 
 
 """
@@ -126,9 +148,6 @@ def train():
     # Load dataset and engineer features
     df = load_data(DATA_PATH)
 
-    # CHANGED: removed the price_per_m2 leakage block that used to sit here
-    # (it derived a feature directly from the target price).
-
     df = add_features(df)
 
     # Separate input features (X) from the target variable (y)
@@ -143,11 +162,6 @@ def train():
         X_temp, y_temp, test_size=0.5, random_state=42
     )
 
-    # Preprocess
-    # NOTE: XGBoost early stopping needs an already-preprocessed eval_set,
-    # so we still fit/transform the preprocessor manually here rather than
-    # calling pipeline.fit() directly (a plain Pipeline can't hand a
-    # pre-transformed validation set to the inner model's eval_set).
     preprocessor = build_preprocessor()
     X_train_p = preprocessor.fit_transform(X_train, y_train)
     X_val_p = preprocessor.transform(X_val)

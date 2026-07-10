@@ -12,8 +12,7 @@ from monitoring.monitor import log_prediction
 
 def generate_realistic_data():
     """
-    Generates data mimicking the full schema of training_baseline.csv
-    to ensure compatible drift detection.
+    Generates data mimicking the full schema of training_baseline.csv.
     """
     build_year = random.randint(1960, 2026)
     livable_surface = random.gauss(120, 30)

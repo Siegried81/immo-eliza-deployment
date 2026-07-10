@@ -8,7 +8,6 @@ sys.path.insert(0, str(BASE_DIR))
 
 from monitoring.monitor import detect_drift
 
-# Features that exist in both baseline and log inputs
 FEATURES_TO_MONITOR = [
     "build_year", "bedroom_count", "livable_surface", "total_surface",
     "garage", "terrace", "swimming_pool", "energy_consumption_kWh_m2_year",
