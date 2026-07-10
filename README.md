@@ -19,7 +19,25 @@ The deployment includes:
 
 ---
 
-# 🛠️ Project Architecture
+## 📑 Table of Contents
+
+- [Project Architecture](#️-project-architecture)
+- [File Purpose](#-file-purpose)
+- [Running the Application](#-running-the-application)
+- [Reliability & Uptime Monitoring](#️-reliability--uptime-monitoring)
+- [Using the Application](#-using-the-application)
+- [Model Performance & Monitoring](#-model-performance--monitoring)
+- [Drift Analysis](#-drift-analysis)
+- [Automated Testing](#-automated-testing)
+- [Technologies Used](#-technologies-used)
+- [Known Limitations & Disclaimer](#️-known-limitations--disclaimer)
+- [Future Improvements](#-future-improvements)
+- [Final Conclusion](#-final-conclusion)
+- [Author](#-author)
+
+---
+
+## 🛠️ Project Architecture
 
 ```text
 immo-eliza-deployment/
@@ -28,7 +46,7 @@ immo-eliza-deployment/
 │   ├── __init__.py
 │   ├── app.py
 │   └── predict.py
-├── models   
+├── models
 ├── monitoring/
 │   ├── __init__.py
 │   ├── check_drift.py
@@ -47,15 +65,17 @@ immo-eliza-deployment/
 │   ├── __init__.py
 │   └── app.py
 ├── tests/
-│   ├── test_app.py
+│   └── test_app.py
 ├── .gitignore
 ├── docker-compose.yml
 └── requirements.txt
 ```
 
+> **Note:** the `data/` folder (raw and cleaned datasets, training baseline) is intentionally excluded via `.gitignore` to keep the repository lightweight. It is generated locally by running the training pipeline (`src/train.py`) and is not required to run the deployed API or Streamlit app, only to retrain the model. The cleaned dataframe is in the repo immo-eliza-ml (folder data).
+
 ---
 
-# 📂 File Purpose
+## 📂 File Purpose
 
 ### `api/app.py`
 
@@ -86,7 +106,7 @@ Standalone evaluation script that loads `models/pipeline.joblib` and scores it a
 - RMSE
 - MAPE
 - Bias direction (over/under-estimation)
-- The 3 worst individual prediction errors (it was the same results for 10)
+- The worst individual prediction errors (the top 3 and top 10 worst cases point to the same ultra-luxury outliers, so only the top 3 are reported)
 
 Useful for spotting where the model struggles the most.
 
@@ -117,11 +137,7 @@ It also creates `data/training_baseline.csv`, which serves as the reference data
 
 ### `scripts/evaluate.py`
 
-Loads `pipeline.joblib` and evaluates the model against `data/clean/cleaned_data.json`, reporting:
-
-- MAE
-- RMSE
-- MAPE
+Lightweight standalone script that loads `pipeline.joblib` and evaluates the model against `data/clean/cleaned_data.json`, reporting MAE, RMSE, and MAPE. Useful for a quick sanity check without the extra detail (bias direction, worst-case errors) provided by `monitoring/metrics.py`.
 
 ### `scripts/predict_cli.py`
 
@@ -145,25 +161,21 @@ Defines and orchestrates the multi-container setup running both the FastAPI back
 
 ---
 
-# 🚀 Running the Application
+## 🚀 Running the Application
 
 The application is available both online through deployed services and locally for development purposes.
 
----
-
-## 🌍 Online Deployment
+### 🌍 Online Deployment
 
 The deployed application can be accessed directly through the following links:
 
-### 🎨 Streamlit User Interface
+**🎨 Streamlit User Interface**
 
 The Streamlit interface allows users to enter property characteristics and obtain an estimated selling price.
 
 ➡️ https://immo-eliza-deployment-sieg.streamlit.app
 
----
-
-### 🚀 FastAPI Backend
+**🚀 FastAPI Backend**
 
 The FastAPI backend provides the REST API used for predictions.
 
@@ -173,18 +185,49 @@ The interactive API documentation is available through Swagger UI:
 
 ➡️ https://immo-eliza-ui.onrender.com/docs
 
----
+### 💻 Local Execution
 
-# 💻 Local Execution
-
-## 1. Clone the repository
+**1. Clone the repository**
 
 ```bash
 git clone https://github.com/Siegried81/immo-eliza-deployment.git
 cd immo-eliza-deployment
 ```
 
-# 🛡️ Reliability & Uptime Monitoring
+**2. Install the dependencies**
+
+```bash
+pip install -r requirements.txt
+```
+
+**3. Run with Docker Compose (recommended)**
+
+This builds and starts both the FastAPI backend and the Streamlit frontend together:
+
+```bash
+docker-compose up --build
+```
+
+- FastAPI docs: [http://localhost:8000/docs](http://localhost:8000/docs)
+- Streamlit app: [http://localhost:8501](http://localhost:8501)
+
+**4. Or run each service manually (without Docker)**
+
+In one terminal, start the API:
+
+```bash
+uvicorn api.app:app --reload --port 8000
+```
+
+In a second terminal, start the Streamlit app:
+
+```bash
+streamlit run streamlit/app.py
+```
+
+---
+
+## 🛡️ Reliability & Uptime Monitoring
 
 To ensure the application remains stable and available 24/7, the project uses three complementary reliability mechanisms.
 
@@ -210,12 +253,9 @@ UptimeRobot periodically sends requests to the `/ping` endpoint to:
 - prevent cold starts,
 - ensure predictions remain immediately available.
 
-A screenshot of the monitoring dashboard is available in:
+The screenshot below shows the UptimeRobot monitoring dashboard as proof that the monitoring system is running correctly:
 
-
-tests/uptimeRobot.png
-
-as proof that the monitoring system is running correctly.
+![UptimeRobot Monitoring Dashboard](tests/uptimeRobot.png)
 
 > **Note**
 >
@@ -224,7 +264,7 @@ as proof that the monitoring system is running correctly.
 
 ---
 
-# 🏡 Using the Application
+## 🏡 Using the Application
 
 The user fills in the property characteristics, including:
 
@@ -241,9 +281,9 @@ After clicking **Predict Price**, the Streamlit application sends the request to
 
 ---
 
-# 📊 Model Performance & Monitoring
+## 📊 Model Performance & Monitoring
 
-## 📈 Model Performance
+### 📈 Model Performance
 
 The model was evaluated using `monitoring/metrics.py` on **15,746** records from `data/clean/cleaned_data.json`.
 
@@ -255,9 +295,7 @@ The model was evaluated using `monitoring/metrics.py` on **15,746** records from
 | Mean Absolute Percentage Error (MAPE) | **16.24%** |
 | Bias | Overestimating prices by **5.64%** on average |
 
----
-
-## 📈 Performance Analysis
+### 📈 Performance Analysis
 
 The large difference between **MAE (~€61k)** and **RMSE (~€243k)** indicates that the model performs well for most properties, while a very small number of extreme prediction errors significantly increase the RMSE.
 
@@ -271,9 +309,7 @@ The three largest prediction errors are shown below.
 | €8,900,000 | €940,093 | €7,959,907 |
 | €8,994,000 | €175,950 | €8,818,050 |
 
----
-
-## ❓ Why Removing the Hard Cap Changed Nothing
+### ❓ Why Removing the Hard Cap Changed Nothing
 
 Removing the €3M hard cap had **no impact** on the evaluation metrics.
 
@@ -287,73 +323,13 @@ Without representative examples of luxury properties, the model simply has no ba
 
 ---
 
-# 🚀 Future Improvements
-
-Several improvements could further increase the reliability of the deployment.
-
-### 📊 Stratify evaluation by price tier
-
-Instead of reporting a single MAE/RMSE/MAPE value, evaluate the model separately for:
-
-- properties below €1M,
-- properties between €1M and €3M,
-- luxury properties above €3M.
-
-This prevents a handful of extreme outliers from dominating the global metrics.
-
----
-
-### 🏡 Train a dedicated luxury-property model
-
-Testing confirmed that simply increasing `QUANTILE_UPPER` does not improve predictions for expensive properties.
-
-A dedicated model trained specifically on luxury listings—or a significantly larger luxury dataset—would likely perform much better.
-
----
-
-### ✅ Verify the evaluation dataset
-
-Confirm whether `cleaned_data.json` represents a true held-out test set or overlaps with the training data.
-
-This distinction has a significant impact on interpreting the reported **16.24% MAPE**.
-
----
-
-# ⚠️ Known Limitations & Disclaimer
-
-This model should be considered **an estimation tool rather than a property valuation system**.
-
-Users should be aware of two important limitations.
-
-## 📈 Systematic Bias
-
-Across the evaluation dataset, the model tends to **overestimate prices by approximately 5.64%**.
-
-Predictions should therefore be interpreted as approximate estimates rather than precise valuations.
-
----
-
-## 🏰 High-End Properties
-
-For properties priced above roughly the **99th percentile** of the training data (multi-million-euro properties), the model is forced to extrapolate far beyond the examples it has learned from.
-
-Prediction errors of several million euros are therefore possible.
-
-The average bias reported above **does not apply** to this segment, where errors become much larger and typically correspond to severe underestimation.
-
----
-
-# 📉 Drift Analysis
+## 📉 Drift Analysis
 
 Monitoring compares **8,000 synthetic production predictions** against the **10,802 samples** used during model training using `monitoring/check_drift.py`.
 
 Data drift is measured using the **Population Stability Index (PSI)**.
 
----
-
-## 🚨 Current Status
-
-### Strong Drift Detected
+### 🚨 Current Status
 
 | Feature | PSI | Status |
 |---------|----:|:------|
@@ -378,9 +354,7 @@ The drift analysis reveals significant distribution changes between production a
 
 These observations highlight the importance of continuous monitoring and future retraining to maintain model reliability.
 
----
-
-# 📈 Monitoring Interpretation
+### 📈 Monitoring Interpretation
 
 The monitoring report indicates that several important input variables have shifted substantially since the model was trained.
 
@@ -397,21 +371,17 @@ These are among the most influential variables used by the XGBoost model.
 
 Because their distributions have evolved, production data no longer perfectly matches the original training data.
 
----
-
-## 📌 Notes About the Monitoring Report
+### 📌 Notes About the Monitoring Report
 
 Two observations deserve attention.
 
-### 1. Redundant Features
+**1. Redundant Features**
 
 `build_year` and `property_age` always produce the exact same PSI value (**0.9734**).
 
 This is expected, so monitoring both variables is redundant.
 
----
-
-### 2. Price per m²
+**2. Price per m²**
 
 `price_per_m2` is still monitored even though it was intentionally removed from the model's training features because it introduced target leakage.
 
@@ -419,9 +389,7 @@ Its PSI therefore reflects differences between production logs and the training 
 
 It may still be useful as an informational metric, but it should **not** be interpreted as evidence that a model input has drifted.
 
----
-
-## 📌 Overall Conclusion
+### 📌 Overall Conclusion
 
 Despite the detected drift, the prediction service remains fully operational and continues to return valid price estimates.
 
@@ -429,40 +397,32 @@ However, the observed distribution shifts suggest that prediction quality is lik
 
 For this reason, the monitoring component recommends retraining the model using more recent real-estate data before the next production deployment.
 
-# 🧪 Automated Testing
+---
+
+## 🧪 Automated Testing
 
 Automated tests verify that both the API and the prediction pipeline behave as expected.
 
----
-
-## 📦 Install Test Dependencies
+### 📦 Install Test Dependencies
 
 ```bash
 pip install pytest httpx
 ```
 
----
-
-## ▶️ Run the Tests
-
-Execute:
+### ▶️ Run the Tests
 
 ```bash
 pytest tests/test_app.py
 ```
 
----
-
-## ✅ Expected Output
+### ✅ Expected Output
 
 ```text
 tests/test_app.py .... [100%]
 ================== 4 passed ==================
 ```
 
----
-
-## ✔️ What Is Tested?
+### ✔️ What Is Tested?
 
 The automated test suite validates several critical aspects of the application:
 
@@ -476,7 +436,7 @@ Passing all tests confirms that the deployed application behaves as expected.
 
 ---
 
-# 📚 Technologies Used
+## 📚 Technologies Used
 
 | Component | Technology |
 |-----------|------------|
@@ -488,10 +448,62 @@ Passing all tests confirms that the deployed application behaves as expected.
 | Monitoring | Population Stability Index (PSI) |
 | Serialization | Joblib |
 | Language | Python |
+| Containerization | Docker / Docker Compose |
+| Deployment | Render (API) · Streamlit Community Cloud (frontend) |
 
 ---
 
-# 📌 Final Conclusion
+## ⚠️ Known Limitations & Disclaimer
+
+This model should be considered **an estimation tool rather than a property valuation system**.
+
+Users should be aware of two important limitations.
+
+### 📈 Systematic Bias
+
+Across the evaluation dataset, the model tends to **overestimate prices by approximately 5.64%**.
+
+Predictions should therefore be interpreted as approximate estimates rather than precise valuations.
+
+### 🏰 High-End Properties
+
+For properties priced above roughly the **99th percentile** of the training data (multi-million-euro properties), the model is forced to extrapolate far beyond the examples it has learned from.
+
+Prediction errors of several million euros are therefore possible.
+
+The average bias reported above **does not apply** to this segment, where errors become much larger and typically correspond to severe underestimation.
+
+---
+
+## 🚀 Future Improvements
+
+Several improvements could further increase the reliability of the deployment.
+
+**📊 Stratify evaluation by price tier**
+
+Instead of reporting a single MAE/RMSE/MAPE value, evaluate the model separately for:
+
+- properties below €1M,
+- properties between €1M and €3M,
+- luxury properties above €3M.
+
+This prevents a handful of extreme outliers from dominating the global metrics.
+
+**🏡 Train a dedicated luxury-property model**
+
+Testing confirmed that simply increasing `QUANTILE_UPPER` does not improve predictions for expensive properties.
+
+A dedicated model trained specifically on luxury listings—or a significantly larger luxury dataset—would likely perform much better.
+
+**✅ Verify the evaluation dataset**
+
+Confirm whether `cleaned_data.json` represents a true held-out test set or overlaps with the training data.
+
+This distinction has a significant impact on interpreting the reported **16.24% MAPE**.
+
+---
+
+## 📌 Final Conclusion
 
 This project demonstrates the complete deployment lifecycle of a machine learning regression model, from data preparation and model serving to monitoring and maintenance.
 
@@ -518,7 +530,7 @@ Overall, this project delivers a complete end-to-end machine learning deployment
 
 ---
 
-# 👤 Author
+## 👤 Author
 
 **Siegried Camus**
 
