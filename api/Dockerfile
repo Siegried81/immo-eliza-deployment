@@ -4,13 +4,11 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY . .
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade pip && \
     pip install --only-binary=:all: -r requirements.txt
-
-COPY api/ /app/api/
 
 EXPOSE 1000
 
