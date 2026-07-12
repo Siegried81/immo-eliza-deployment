@@ -41,7 +41,7 @@ immo-eliza-deployment/
 ├── models/
 ├── monitoring/
 │   ├── __init__.py
-│   ├── check_drift.py        # PSI drift report vs. training baseline
+│   ├── check_drift.py         # PSI drift report vs. training baseline
 │   ├── generate_logs.py       # Synthetic logs for testing the monitoring pipeline
 │   ├── metrics.py             # True-holdout evaluation, by price tier
 │   └── monitor.py             # log_prediction(), PSI computation
@@ -58,11 +58,7 @@ immo-eliza-deployment/
 │   ├── app.py
 │   └── Dockerfile
 ├── tests/
-│   ├── __pycache__/
-│   ├── predict1.png
-│   ├── predict2.png
 │   ├── test_app.py
-│   └── uptimeRobot.png
 ├── .dockerignore
 ├── .gitignore
 ├── docker-compose.yml
@@ -102,7 +98,7 @@ immo-eliza-deployment/
 ### 🌐 Live Deployment
 
 - **Web App (Streamlit Community Cloud):** https://immo-eliza-deployment-sieg.streamlit.app
-- **API (Render):** https://immo-eliza-a.onrender.com
+- **API (Render):** https://immo-eliza-ui.onrender.com
 - **API Docs (Swagger UI):** https://immo-eliza-ui.onrender.com/docs
 
 ### Method 1 — Docker Compose (recommended)
@@ -249,18 +245,6 @@ pytest tests/test_app.py
 ```
 
 Expected: `4 passed`. Covers: API health check, successful prediction on valid input, numeric correctness, invalid-input validation (422).
-
----
-
-## 🚀 Future Improvements
-
-| Improvement | Status |
-|---|---|
-| Stratify evaluation by price tier | ✅ Done |
-| Dedicated luxury-property model | ✅ Done (clear benefit only on €3M+) |
-| True holdout evaluation | ✅ Done |
-| Prediction intervals (quantile/conformal) | ✅ Done |
-| Simplify monitored features (drop `property_age`, relabel `price_per_m2`) | ✅ Done |
 
 ---
 
