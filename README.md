@@ -59,8 +59,8 @@ immo-eliza-deployment/
 │   └── Dockerfile
 ├── tests/
 │   ├── __pycache__/
-│   ├── prediction1.png
-│   ├── prediction2.png
+│   ├── predict1.png
+│   ├── predict2.png
 │   ├── test_app.py
 │   └── uptimeRobot.png
 ├── .dockerignore
@@ -147,19 +147,19 @@ Enter property type, location, surface, bedrooms, construction year, energy cons
 
 ## 🔮 Prediction Examples
 
-The screenshots below show two real predictions from the deployed Streamlit app.
+The screenshots below show two real predictions from the deployed Streamlit app, including the disclaimer shown alongside every prediction.
 
 **Example 1 — Standard property:**
 
-![Prediction 1](tests/prediction1.png)
+![Prediction 1](tests/predict1.png)
 
-Estimated price: **€1,310,313**
+Estimated price: **€283,578**
 
-**Example 2 — Smaller property:**
+**Example 2 — Higher-value property:**
 
-![Prediction 2](tests/prediction2.png)
+![Prediction 2](tests/predict2.png)
 
-Estimated price: **€212,262**
+Estimated price: **€1,449,607**
 
 ---
 
