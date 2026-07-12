@@ -10,6 +10,3 @@ Dockerfile
 .docker-compose.yml
 .idea
 .vscode
-
-streamlit/
-models/
