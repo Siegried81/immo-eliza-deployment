@@ -44,10 +44,16 @@ monitoring/logs.json
 *.pickle
 
 
-data/
-models/
+data/  
+models/*
+!models/pipeline.joblib
+!models/pipeline_luxury.joblib
+!models/luxury_classifier.joblib
+!models/luxury_threshold.json
+!models/pipeline_lower.joblib
+!models/pipeline_upper.joblib 
 *.csv
-*.json
+
 
 .docker/
 
