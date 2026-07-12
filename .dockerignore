@@ -1,0 +1,15 @@
+.git
+.venv
+venv
+env
+__pycache__
+.DS_Store
+*.log
+.dockerignore
+Dockerfile
+.docker-compose.yml
+.idea
+.vscode
+
+streamlit/
+models/
