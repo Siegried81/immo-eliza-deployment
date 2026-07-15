@@ -80,9 +80,9 @@ with center:
             "supermarket_distance_m": supermarket_distance_m
         }
 
-        try:
+try:
             with st.spinner("Calculating prediction..."):
-                # Concatenate /predict to use the dynamic base URL[cite: 1]
+                # Concatenate /predict to use the dynamic base URL
                 response = requests.post(f"{API_URL}/predict", json=payload, timeout=80)
 
             if response.status_code == 200:
@@ -90,17 +90,17 @@ with center:
                 st.success(f"✅ Prediction generated successfully!")
                 st.metric("Estimated Price", f"€ {result['prediction']:,.0f}")
 
+                # Only show luxury caption if the segment is luxury
                 if result.get("segment") == "luxury":
                     st.caption("🏛️ This property was routed to the luxury-segment model, trained on a smaller pool of high-end listings.")
 
-                st.caption()
             elif response.status_code == 400:
                 error_data = response.json()
                 st.error(f"⚠️ Input Error: {error_data.get('detail', 'Please check your inputs.')}")
             else:
                 st.error(f"Server Error ({response.status_code}): Please try again later.")
 
-        except requests.exceptions.ConnectionError:
+except requests.exceptions.ConnectionError:
             st.error("❌ Connection error: Unable to reach the API. Please ensure the backend is running.")
-        except Exception as e:
+except Exception as e:
             st.error(f"❌ Unexpected error: {e}")
