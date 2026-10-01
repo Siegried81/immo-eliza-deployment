@@ -25,10 +25,42 @@ PIPELINE_LOWER_PATH = MODEL_DIR / "pipeline_lower.joblib"
 PIPELINE_UPPER_PATH = MODEL_DIR / "pipeline_upper.joblib"
 TARGET = "price"
 
-DEFAULT_ROUTING_THRESHOLD = 0.7
+# Chosen on the validation split (scripts/evaluate_stratified.py): the
+# classifier's probabilities are inflated by scale_pos_weight (~99), so at 0.7
+# most routed properties were not luxury and jumped to a luxury-model price.
+DEFAULT_ROUTING_THRESHOLD = 0.9
+
+# Train/validation split, shared with the evaluation scripts so they score
+# only rows that no model was fitted on.
+TEST_SIZE = 0.2
+SPLIT_SEED = 42
 
 QUANTILE_LOWER = 0.10
 QUANTILE_UPPER = 0.90
+# Coverage the 10th-90th percentile range is calibrated to.
+INTERVAL_COVERAGE = QUANTILE_UPPER - QUANTILE_LOWER
+INTERVAL_CALIBRATION_PATH = MODEL_DIR / "interval_calibration.json"
+
+
+def calibration_halves(val_index):
+    """
+    Split the validation rows in two: one half calibrates the price range, the
+    other only measures the coverage obtained, so the reported coverage is not
+    computed on the rows that set the margin.
+    """
+    return train_test_split(val_index, test_size=0.5, random_state=SPLIT_SEED)
+
+
+def conformal_margin(lower_log, upper_log, y_log, coverage):
+    """
+    Conformalized quantile regression: the log-scale amount to widen (or, if
+    negative, narrow) both bounds so that `coverage` of the calibration rows
+    fall inside. Raw quantile models covered only ~71% instead of 80%; the
+    finite-sample quantile level gives the coverage guarantee on new rows.
+    """
+    scores = np.maximum(lower_log - y_log, y_log - upper_log)
+    level = min(1.0, np.ceil((len(scores) + 1) * coverage) / len(scores))
+    return float(np.quantile(scores, level, method="higher"))
 
 
 def build_preprocessor():
@@ -56,7 +88,7 @@ def train():
     X = df.drop(columns=[TARGET])
     y = np.log1p(df[TARGET].clip(df[TARGET].quantile(0.01), df[TARGET].quantile(0.99)))
 
-    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
+    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=TEST_SIZE, random_state=SPLIT_SEED)
     preprocessor = build_preprocessor()
     X_train_p = preprocessor.fit_transform(X_train, y_train)
     X_val_p = preprocessor.transform(X_val)
@@ -122,7 +154,10 @@ def train():
 
     # Train the luxury-segment regressor on luxury-labeled rows only
     X_lux_train = X_train[y_lux.loc[X_train.index] == 1]
-    y_lux_train_price = y_train.loc[X_lux_train.index]
+    # Unclipped prices: y_train is clipped at the 99th percentile, which is the
+    # luxury threshold itself, so every luxury row would share the same target
+    # and the regressor would learn a constant.
+    y_lux_train_price = np.log1p(df.loc[X_lux_train.index, TARGET])
     if len(X_lux_train) >= 20:
         X_lux_train_p = preprocessor.transform(X_lux_train)
         luxury_model = XGBRegressor(
@@ -151,6 +186,34 @@ def train():
             "routing_probability_threshold": DEFAULT_ROUTING_THRESHOLD,
             "luxury_model_available": luxury_model_available
         }, f)
+
+    # Calibrate the range on validation rows the API would give a range to
+    # (routed to the standard model), against real, unclipped prices.
+    lower_log = lower_model.predict(X_val_p)
+    upper_log = upper_model.predict(X_val_p)
+    y_val_log = np.log1p(df.loc[X_val.index, TARGET]).to_numpy()
+    standard = clf.predict_proba(X_val_p)[:, 1] < DEFAULT_ROUTING_THRESHOLD
+    calib_index, _ = calibration_halves(X_val.index)
+    calib = standard & X_val.index.isin(calib_index)
+    check = standard & ~X_val.index.isin(calib_index)
+
+    margin = conformal_margin(lower_log[calib], upper_log[calib], y_val_log[calib], INTERVAL_COVERAGE)
+
+    def coverage(m):
+        y = y_val_log[check]
+        return float(np.mean((y >= lower_log[check] - m) & (y <= upper_log[check] + m)))
+
+    with open(INTERVAL_CALIBRATION_PATH, "w") as f:
+        json.dump({
+            "target_coverage": round(INTERVAL_COVERAGE, 2),
+            "log_margin": margin,
+            "calibration_rows": int(calib.sum()),
+            "check_rows": int(check.sum()),
+            "check_coverage_raw": round(coverage(0.0), 4),
+            "check_coverage_calibrated": round(coverage(margin), 4),
+        }, f, indent=1)
+    print(f"Price range: coverage {coverage(0.0):.1%} -> {coverage(margin):.1%} "
+          f"on {int(check.sum())} held-out rows (log margin {margin:+.3f})")
 
     print("Training complete. Models updated.")
 
