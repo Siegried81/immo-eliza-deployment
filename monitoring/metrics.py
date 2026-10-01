@@ -1,26 +1,38 @@
+"""
+Score the standard model (no luxury routing) on train.py's validation split,
+overall and per price tier.
+
+The validation split is the only data no model was fitted on (it does serve
+early stopping for the standard model). The earlier "true holdout" (rows
+absent from data/training_baseline.csv) still held ~80% of the training rows.
+"""
+import json
 import sys
 import joblib
 import numpy as np
 import pandas as pd
 from pathlib import Path
+from sklearn.model_selection import train_test_split
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 SRC_DIR = BASE_DIR / "src"
 sys.path.insert(0, str(SRC_DIR))
 
-from features import add_features 
+from features import add_features
+from train import SPLIT_SEED, TEST_SIZE
 
 # Paths and evaluation
 PIPELINE_PATH = BASE_DIR / "models" / "pipeline.joblib"
 TEST_FILE = BASE_DIR / "data" / "clean" / "cleaned_data.json"
-TRAIN_BASELINE_PATH = BASE_DIR / "data" / "training_baseline.csv"
+LUXURY_PRICE = json.loads((BASE_DIR / "models" / "luxury_threshold.json").read_text())["luxury_price_threshold"]
 
 # Price tiers used for stratified reporting, so a handful of luxury
-# outliers can't dominate the headline metric.
+# outliers can't dominate the headline metric. The top tier starts at the
+# luxury price threshold, the segment the routing classifier detects.
 PRICE_TIERS = [
     ("< €1M", 0, 1_000_000),
-    ("€1M - €3M", 1_000_000, 3_000_000),
-    ("€3M+", 3_000_000, float("inf")),
+    (f"€1M - €{LUXURY_PRICE / 1e6:.1f}M", 1_000_000, LUXURY_PRICE),
+    (f"€{LUXURY_PRICE / 1e6:.1f}M+", LUXURY_PRICE, float("inf")),
 ]
 
 
@@ -30,6 +42,8 @@ def evaluate_model(json_path):
 
     pipeline = joblib.load(PIPELINE_PATH)
     df = pd.read_json(json_path)
+    _, df = train_test_split(df, test_size=TEST_SIZE, random_state=SPLIT_SEED)
+    print(f"Validation split: {len(df)} rows\n")
 
     actual_prices = df["price"].values
     df_processed = add_features(df.drop(columns=["price"]))
@@ -53,26 +67,6 @@ def print_metrics(label, actuals, predictions):
     print(f"{label:<15}: n={len(actuals):<6} MAE=€{mae:>12,.2f}  RMSE=€{rmse:>12,.2f}  MAPE={mape:>6.2f}%")
 
 
-def check_evaluation_overlap():
-    
-    if not TRAIN_BASELINE_PATH.exists():
-        return
-    try:
-        train_df = pd.read_csv(TRAIN_BASELINE_PATH)
-        test_df = pd.read_json(TEST_FILE)
-        shared_cols = [c for c in ["livable_surface", "build_year", "bedroom_count"]
-                       if c in train_df.columns and c in test_df.columns]
-        if not shared_cols:
-            return
-        merged = test_df[shared_cols].merge(train_df[shared_cols].drop_duplicates(), on=shared_cols, how="inner")
-        overlap_pct = 100 * len(merged) / max(len(test_df), 1)
-        if overlap_pct > 5:
-            print(f"\n⚠️  Provenance check: ~{overlap_pct:.1f}% of evaluation rows match training rows on "
-                  f"build_year/bedroom_count/livable_surface. Worth confirming the evaluation set is a genuine "
-                  f"hold-out and doesn't overlap with training data.")
-    except Exception:
-        pass 
-
 if __name__ == "__main__":
     if TEST_FILE.exists():
         predictions, actuals = evaluate_model(TEST_FILE)
@@ -85,7 +79,7 @@ if __name__ == "__main__":
         mape = np.mean(abs_diffs / actuals) * 100
         mpe = np.mean(diffs / actuals) * 100
 
-        print("\nPerformance evaluation (overall)")
+        print("Performance evaluation (validation split, standard model only)")
         print(f"Total records evaluated : {len(predictions)}")
         print(f"MAE                     : €{mae:,.2f}")
         print(f"RMSE                    : €{rmse:,.2f}")
@@ -104,7 +98,5 @@ if __name__ == "__main__":
         worst_indices = np.argsort(abs_diffs)[-3:]
         for idx in worst_indices:
             print(f"Actual: €{actuals[idx]:,.2f} | Predicted: €{predictions[idx]:,.2f} | Error: €{abs_diffs[idx]:,.2f}")
-
-        check_evaluation_overlap()
     else:
         print(f"Error: File not found at {TEST_FILE}")
