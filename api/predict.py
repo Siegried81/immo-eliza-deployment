@@ -1,121 +1,67 @@
-import numpy as np
-import pandas as pd
-import joblib
 import json
-from pathlib import Path
 import sys
-import logging
-
-project_root = Path(__file__).resolve().parents[1]
-if str(project_root) not in sys.path:
-    sys.path.append(str(project_root))
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+import joblib
+import pandas as pd
+import numpy as np
+from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-SRC_DIR = BASE_DIR / "src"
+MODEL_DIR = BASE_DIR / "models"
+sys.path.append(str(BASE_DIR / "src"))
 
-sys.path.insert(0, str(SRC_DIR))
+from src.features import add_features, load_vocabulary, to_training_vocabulary
 
-from features import add_features
-from monitoring.monitor import calculate_psi
+class PredictEngine:
+    """Loads the five model artifacts once and serves single-property predictions."""
 
-PIPELINE_PATH = BASE_DIR / "models" / "pipeline.joblib"
-PIPELINE_LOWER_PATH = BASE_DIR / "models" / "pipeline_lower.joblib"
-PIPELINE_UPPER_PATH = BASE_DIR / "models" / "pipeline_upper.joblib"
-PIPELINE_LUXURY_PATH = BASE_DIR / "models" / "pipeline_luxury.joblib"
-LUXURY_THRESHOLD_PATH = BASE_DIR / "models" / "luxury_threshold.json"
-
-LUXURY_ROUTING_MARGIN = 0.8
-
-
-class PredictionError(Exception):
-    """Raised when prediction fails"""
-    pass
-
-
-class PredictionEngine:
-    """
-    Initialize the prediction engine. Pipelines are loaded only once when
-    the application starts.
-    """
     def __init__(self):
-        try:
-            if not PIPELINE_PATH.exists():
-                raise FileNotFoundError(f"Pipeline not found: {PIPELINE_PATH}")
+        self.pipeline = joblib.load(MODEL_DIR / "pipeline.joblib")
+        self.pipeline_luxury = joblib.load(MODEL_DIR / "pipeline_luxury.joblib")
+        self.luxury_classifier = joblib.load(MODEL_DIR / "luxury_classifier.joblib")
+        self.pipeline_lower = joblib.load(MODEL_DIR / "pipeline_lower.joblib")
+        self.pipeline_upper = joblib.load(MODEL_DIR / "pipeline_upper.joblib")
+        # Conformal widening of the quantile range (see src/train.py::conformal_margin);
+        # without it the raw 10th-90th percentile models cover ~71% instead of 80%.
+        calibration = MODEL_DIR / "interval_calibration.json"
+        self.interval_margin = json.loads(calibration.read_text())["log_margin"] if calibration.exists() else 0.0
+        self.vocabulary = load_vocabulary()
 
-            self.pipeline = joblib.load(PIPELINE_PATH)
+    def predict(self, data: dict):
+        """
+        Run every model on one property.
 
-            # Optional (None if not yet trained).
-            self.lower_pipeline = joblib.load(PIPELINE_LOWER_PATH) if PIPELINE_LOWER_PATH.exists() else None
-            self.upper_pipeline = joblib.load(PIPELINE_UPPER_PATH) if PIPELINE_UPPER_PATH.exists() else None
-            self.luxury_pipeline = joblib.load(PIPELINE_LUXURY_PATH) if PIPELINE_LUXURY_PATH.exists() else None
+        Inputs are first rewritten into the training vocabulary (see
+        to_training_vocabulary): without it the encoder ignored property type,
+        province and state. Raises ValueError for categories the models never saw.
+        """
+        data, notes = to_training_vocabulary(data, self.vocabulary)
+        df = pd.DataFrame([data])
+        # A field sent as None becomes an object column; make it a numeric NaN
+        # so add_features and the pipeline's median imputer treat it as missing.
+        df = df.apply(lambda col: pd.to_numeric(col) if col.isna().all() else col)
 
-            self.luxury_threshold = None
-            if LUXURY_THRESHOLD_PATH.exists():
-                with open(LUXURY_THRESHOLD_PATH) as f:
-                    info = json.load(f)
-                    if info.get("luxury_model_available"):
-                        self.luxury_threshold = info.get("luxury_threshold")
+        df = add_features(df)
 
-            if self.lower_pipeline is None or self.upper_pipeline is None:
-                logger.info("Prediction interval models not found -- predict() will omit lower/upper bounds.")
-            if self.luxury_pipeline is None or self.luxury_threshold is None:
-                logger.info("Luxury-segment model not found -- predict() will always use the standard model.")
+        # Generate predictions
+        standard_pred = float(np.expm1(self.pipeline.predict(df)[0]))
+        luxury_pred = float(np.expm1(self.pipeline_luxury.predict(df)[0]))
 
-        except Exception as e:
-            raise PredictionError(f"Failed to initialize prediction engine: {str(e)}")
+        # Generate luxury probability
+        luxury_proba = float(self.luxury_classifier.predict_proba(df)[0][1])
 
-    """
-    Internal helper to check for data drift.
-    """
-    def _check_drift(self, df: pd.DataFrame):
-        # Skipped for single-row prediction to avoid argument errors
-        logger.info("Drift detection skipped for single-row prediction.")
-        return True
+        # Generate prediction interval (quantile models)
+        lower_pred = float(np.expm1(self.pipeline_lower.predict(df)[0] - self.interval_margin))
+        upper_pred = float(np.expm1(self.pipeline_upper.predict(df)[0] + self.interval_margin))
 
-    """
-    Generate a property price prediction.
-    Returns a dict: {
-        "prediction": float,
-        "lower": float | None,
-        "upper": float | None,
-        "segment": "standard" | "luxury",
-    }
-    """
-    def predict(self, data: dict) -> dict:
-        try:
-            df = add_features(pd.DataFrame([data]))
-            self._check_drift(df)
+        return {
+            "prediction": standard_pred,
+            "luxury_prediction": luxury_pred,
+            "luxury_proba": luxury_proba,
+            "prediction_interval": {
+                "lower": lower_pred,
+                "upper": upper_pred
+            },
+            "notes": notes,
+        }
 
-            point = float(np.expm1(self.pipeline.predict(df))[0])
-            segment = "standard"
-
-            if self.luxury_pipeline is not None and self.luxury_threshold is not None:
-                if point >= self.luxury_threshold * LUXURY_ROUTING_MARGIN:
-                    point = float(np.expm1(self.luxury_pipeline.predict(df))[0])
-                    segment = "luxury"
-
-            lower = upper = None
-            if segment == "standard" and self.lower_pipeline is not None and self.upper_pipeline is not None:
-                lower = float(np.expm1(self.lower_pipeline.predict(df))[0])
-                upper = float(np.expm1(self.upper_pipeline.predict(df))[0])
-                # Quantile models are trained independently and can occasionally
-                # cross the point estimate or each other -- guard against that.
-                lower, upper = min(lower, point), max(upper, point)
-
-            return {
-                "prediction": point,
-                "lower": lower,
-                "upper": upper,
-                "segment": segment,
-            }
-
-        except ValueError as e:
-            raise PredictionError(f"Data processing error: {str(e)}")
-        except Exception as e:
-            raise PredictionError(f"Prediction failed: {str(e)}")
-
-
-engine = PredictionEngine()
+engine = PredictEngine()

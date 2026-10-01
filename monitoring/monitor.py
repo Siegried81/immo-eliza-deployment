@@ -51,7 +51,8 @@ def calculate_psi(expected_df: pd.DataFrame, actual_df: pd.DataFrame):
 def detect_drift(train_df: pd.DataFrame, live_df: pd.DataFrame, threshold=0.25):
     """Compare training data distribution against live data."""
     results = {}
-    numerical_columns = train_df.select_dtypes(include=np.number).columns
+
+    numerical_columns = train_df.select_dtypes(include=[np.number, bool]).columns
     for col in numerical_columns:
         if col in live_df.columns:
             train_data = train_df[col].dropna().astype(float)
