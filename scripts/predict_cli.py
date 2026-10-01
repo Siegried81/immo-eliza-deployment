@@ -9,7 +9,7 @@ SRC_DIR = BASE_DIR / "src"
 
 # Add src/ directly to sys.path
 sys.path.insert(0, str(SRC_DIR))
-from src.features import add_features
+from src.features import add_features, load_vocabulary, to_training_vocabulary
 
 PIPELINE_PATH = BASE_DIR / "models" / "pipeline.joblib"
 
@@ -45,8 +45,11 @@ def run_prediction():
 
     pipeline = joblib.load(PIPELINE_PATH)
 
-    # Prepare data
-    df = pd.DataFrame([get_user_input()])
+    # Prepare data: map the typed categories to the spellings the model was trained on
+    data, notes = to_training_vocabulary(get_user_input(), load_vocabulary())
+    for note in notes:
+        print(f"Note: {note}")
+    df = pd.DataFrame([data])
     df = add_features(df)
 
     # Predict

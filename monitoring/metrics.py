@@ -1,26 +1,38 @@
+"""
+Score the standard model (no luxury routing) on train.py's validation split,
+overall and per price tier.
+
+The validation split is the only data no model was fitted on (it does serve
+early stopping for the standard model). The earlier "true holdout" (rows
+absent from data/training_baseline.csv) still held ~80% of the training rows.
+"""
+import json
 import sys
 import joblib
 import numpy as np
 import pandas as pd
 from pathlib import Path
+from sklearn.model_selection import train_test_split
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 SRC_DIR = BASE_DIR / "src"
 sys.path.insert(0, str(SRC_DIR))
 
 from features import add_features
+from train import SPLIT_SEED, TEST_SIZE
 
 # Paths and evaluation
 PIPELINE_PATH = BASE_DIR / "models" / "pipeline.joblib"
 TEST_FILE = BASE_DIR / "data" / "clean" / "cleaned_data.json"
-TRAIN_BASELINE_PATH = BASE_DIR / "data" / "training_baseline.csv"
+LUXURY_PRICE = json.loads((BASE_DIR / "models" / "luxury_threshold.json").read_text())["luxury_price_threshold"]
 
 # Price tiers used for stratified reporting, so a handful of luxury
-# outliers can't dominate the headline metric.
+# outliers can't dominate the headline metric. The top tier starts at the
+# luxury price threshold, the segment the routing classifier detects.
 PRICE_TIERS = [
     ("< €1M", 0, 1_000_000),
-    ("€1M - €3M", 1_000_000, 3_000_000),
-    ("€3M+", 3_000_000, float("inf")),
+    (f"€1M - €{LUXURY_PRICE / 1e6:.1f}M", 1_000_000, LUXURY_PRICE),
+    (f"€{LUXURY_PRICE / 1e6:.1f}M+", LUXURY_PRICE, float("inf")),
 ]
 
 
@@ -30,14 +42,8 @@ def evaluate_model(json_path):
 
     pipeline = joblib.load(PIPELINE_PATH)
     df = pd.read_json(json_path)
-
-    if TRAIN_BASELINE_PATH.exists() and "property_id" in df.columns:
-        train_ids = set(pd.read_csv(TRAIN_BASELINE_PATH)["property_id"])
-        before = len(df)
-        df = df[~df["property_id"].isin(train_ids)].copy()
-        excluded_pct = 100 * (before - len(df)) / before if before else 0
-        print(f"Filtered to true holdout: {len(df)}/{before} rows "
-              f"({excluded_pct:.1f}% excluded as training overlap)\n")
+    _, df = train_test_split(df, test_size=TEST_SIZE, random_state=SPLIT_SEED)
+    print(f"Validation split: {len(df)} rows\n")
 
     actual_prices = df["price"].values
     df_processed = add_features(df.drop(columns=["price"]))
@@ -73,7 +79,7 @@ if __name__ == "__main__":
         mape = np.mean(abs_diffs / actuals) * 100
         mpe = np.mean(diffs / actuals) * 100
 
-        print("Performance evaluation (true holdout)")
+        print("Performance evaluation (validation split, standard model only)")
         print(f"Total records evaluated : {len(predictions)}")
         print(f"MAE                     : €{mae:,.2f}")
         print(f"RMSE                    : €{rmse:,.2f}")

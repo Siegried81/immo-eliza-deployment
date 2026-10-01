@@ -3,10 +3,14 @@
 venv
 env
 __pycache__
+.pytest_cache
 .DS_Store
 *.log
 .dockerignore
 Dockerfile
-.docker-compose.yml
+docker-compose.yml
 .idea
 .vscode
+data
+tests
+monitoring/logs.json
