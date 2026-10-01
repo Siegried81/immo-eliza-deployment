@@ -1,14 +1,16 @@
 fastapi
 uvicorn
-streamlit==1.58.0
-
+streamlit==1.48.0
 pandas
 numpy
 
-scikit-learn
-xgboost>=2.0
+# The models in models/ are pickled: these three must match the versions they
+# were trained with, or loading fails (category_encoders >= 2.10 raises
+# AttributeError on the fitted TargetEncoder). Re-pin after retraining.
+scikit-learn==1.9.0
+xgboost==3.2.0
+category_encoders==2.8.1
 joblib
-category_encoders
 
 requests
 python-dotenv

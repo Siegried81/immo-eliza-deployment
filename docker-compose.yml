@@ -1,5 +1,5 @@
-version: '3.9'
-
+# Local stack: API on http://localhost:8000, UI on http://localhost:8501.
+# No source volumes: mounting ./api over /app hid src/, monitoring/ and models/.
 services:
   api:
     build:
@@ -7,10 +7,8 @@ services:
       dockerfile: api/Dockerfile
     container_name: immo-api
     ports:
-      - "8000:1000" 
-    volumes:
-      - ./api:/app
-      - ./models:/app/models
+      - "8000:8000"
+    restart: unless-stopped
 
   streamlit:
     build:
@@ -19,8 +17,9 @@ services:
     container_name: immo-ui
     ports:
       - "8501:10000"
+    environment:
+      # Service name on the compose network; localhost would be the UI container itself.
+      - API_URL=http://api:8000
     depends_on:
       - api
-    volumes:
-      - ./streamlit:/app
-      - ./models:/app/models
+    restart: unless-stopped
