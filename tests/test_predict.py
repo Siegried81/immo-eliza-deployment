@@ -8,6 +8,7 @@ ignoring a feature again (a house and an apartment once got the same price).
 import json
 
 import numpy as np
+import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
@@ -140,3 +141,27 @@ class TestPredictEndpoint:
 
     def test_ping(self):
         assert client.get("/ping").json() == {"status": "alive"}
+
+
+class TestStateEncoding:
+    """The two state dictionaries are keyed the way the data spells the states.
+
+    They used to carry underscores, which no row matched, so every multi-word
+    state was encoded as NORMAL in training and at inference alike.
+    """
+
+    @pytest.mark.parametrize("spelling", ["TO RENOVATE", "to renovate", "to_renovate", " TO  RENOVATE "])
+    def test_a_multi_word_state_keeps_its_own_ordinal_and_energy(self, spelling):
+        from src.features import add_features
+
+        df = add_features(pd.DataFrame([{**HOUSE_IN_LIEGE, "property_state": spelling}]))
+        assert df.loc[0, "property_state"] == "TO RENOVATE"
+        assert df.loc[0, "property_state_encoded"] == 2
+        assert df.loc[0, "energy_consumption_kWh_m2_year"] == 180
+
+    def test_every_training_state_has_an_ordinal_and_an_energy(self):
+        from src.features import ENERGY_MEAN_BY_STATE, STATE_MAPPING
+
+        for state in VOCABULARY["property_states"]:
+            assert state in STATE_MAPPING, state
+            assert state in ENERGY_MEAN_BY_STATE, state

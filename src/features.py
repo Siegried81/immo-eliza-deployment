@@ -14,24 +14,30 @@ VOCABULARY_PATH = Path(__file__).resolve().parent.parent / "models" / "categorie
 # global mean, so its own price level barely counts.
 LOW_SAMPLE_CITY = 20
 
+# Keys are spelled the way the training data and models/categories.json spell
+# the states: upper case, words separated by a SPACE. They used to carry an
+# underscore ("TO_RENOVATE"), which no row ever matched, so every multi-word
+# state fell through to NORMAL - ordinal 3 and 130 kWh - in training and at
+# inference alike. Changing the keys changes two numeric features for those
+# states, so the models have to be retrained after this (python src/train.py).
 ENERGY_MEAN_BY_STATE = {
     "NEW": 80,
     "EXCELLENT": 90,
-    "FULLY_RENOVATED": 110,
-    "UNDER_CONSTRUCTION": 100,
+    "FULLY RENOVATED": 110,
+    "UNDER CONSTRUCTION": 100,
     "NORMAL": 130,
-    "TO_RENOVATE": 180,
-    "TO_RESTORE": 220,
-    "TO_DEMOLISH": 300,
+    "TO RENOVATE": 180,
+    "TO RESTORE": 220,
+    "TO DEMOLISH": 300,
 }
 
 STATE_MAPPING = {
-    "TO_DEMOLISH": 0,
-    "TO_RESTORE": 1,
-    "TO_RENOVATE": 2,
+    "TO DEMOLISH": 0,
+    "TO RESTORE": 1,
+    "TO RENOVATE": 2,
     "NORMAL": 3,
-    "UNDER_CONSTRUCTION": 4,
-    "FULLY_RENOVATED": 5,
+    "UNDER CONSTRUCTION": 4,
+    "FULLY RENOVATED": 5,
     "EXCELLENT": 6,
     "NEW": 7,
 }
@@ -64,11 +70,17 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
             df[column] = value
 
     # Property state cleaning
+    # Upper case with single spaces is the canonical spelling (see the two
+    # dictionaries above); an underscore or stray whitespace from a caller is
+    # folded into it rather than silently becoming NORMAL.
     df["property_state"] = (
         df["property_state"]
         .fillna("NORMAL")
         .astype(str)
         .str.upper()
+        .str.replace("_", " ", regex=False)
+        .str.split()
+        .str.join(" ")
     )
 
     # Energy consumption logic

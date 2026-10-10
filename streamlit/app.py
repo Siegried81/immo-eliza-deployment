@@ -32,7 +32,7 @@ VOCABULARY = load_vocabulary()
 PROVINCES = VOCABULARY["provinces"]
 # Best condition first, using the same order as the model's state encoding.
 STATES = sorted(VOCABULARY["property_states"],
-                key=lambda s: -STATE_MAPPING.get(s.replace(" ", "_"), STATE_MAPPING["NORMAL"]))
+                key=lambda s: -STATE_MAPPING.get(s, STATE_MAPPING["NORMAL"]))
 
 CSS = """
 <style>
