@@ -219,20 +219,20 @@ All figures are measured on `train.py`'s **validation split**: 3,150 listings no
 
 | Metric | Value |
 |---|---:|
-| MAE | €92,025 |
-| RMSE | €225,202 |
-| MAPE | 22.39% |
-| Bias | +4.90% (overestimation) |
+| MAE | €92,632 |
+| RMSE | €225,823 |
+| MAPE | 22.34% |
+| Bias | +4.62% (overestimation) |
 
 | Tier | N | MAE | MAPE |
 |---|---:|---:|---:|
-| < €1M | 3,005 | €67,092 | 21.94% |
-| €1M–€1.9M | 110 | €376,244 | 27.40% |
-| €1.9M+ | 35 | €1,339,442 | 44.99% |
+| < €1M | 3,005 | €67,657 | 21.89% |
+| €1M–€1.9M | 110 | €372,003 | 27.01% |
+| €1.9M+ | 35 | €1,358,850 | 46.01% |
 
 The standard model is trained on prices clipped to the 1st–99th percentile (€1.9M at the top), so it cannot predict above that: the worst errors are €5M–€6.5M properties predicted under €2M. That is what the luxury model is for.
 
-**Prediction interval:** standard-segment predictions come with a 10th–90th percentile range from two extra `XGBRegressor` models (`objective="reg:quantileerror"`), returned as `prediction_interval: {lower, upper}`. The raw models were too narrow: on unseen listings they held the real price only ~71% of the time. `train.py` now calibrates them with **conformalized quantile regression** (CQR): on half of the validation split (standard-routed rows, real unclipped prices) it finds the log-scale margin that makes 80% of prices fall inside, saves it to `models/interval_calibration.json`, and the API widens both bounds by it (currently ×1.05 / ÷1.05). On the other half, never used to set the margin, coverage goes from 70.4% to 77.6%; over 200 random halvings it averages 79.9% (5th–95th percentile: 77.5%–82.1%). Not available for the luxury segment (too few rows for a stable quantile fit).
+**Prediction interval:** standard-segment predictions come with a 10th–90th percentile range from two extra `XGBRegressor` models (`objective="reg:quantileerror"`), returned as `prediction_interval: {lower, upper}`. The raw models were too narrow: on unseen listings they held the real price only ~71% of the time. `train.py` now calibrates them with **conformalized quantile regression** (CQR): on half of the validation split (standard-routed rows, real unclipped prices) it finds the log-scale margin that makes 80% of prices fall inside, saves it to `models/interval_calibration.json`, and the API widens both bounds by it (currently ×1.05 / ÷1.05). On the other half, never used to set the margin, coverage goes from 70.7% to 77.8%. Not available for the luxury segment (too few rows for a stable quantile fit).
 
 ---
 
@@ -244,12 +244,12 @@ Validation split, by tier (`scripts/evaluate_stratified.py`):
 
 | Routing | Overall MAPE | < €1M | €1M–€1.9M | ≥ €1.9M (35) | Rows routed |
 |---|---:|---:|---:|---:|---:|
-| No routing | 22.4% | 21.9% | 27.4% | 45.0% (bias −45%) | 0 |
-| Threshold 0.7 | 26.0% | 25.0% | 49.9% | 29.6% | 80 |
-| **Threshold 0.9 (chosen)** | **22.9%** | **22.3%** | **36.2%** | **34.3%** | **42** |
-| Threshold 0.95 | 22.5% | 22.0% | 32.2% | 38.3% | 24 |
+| No routing | 22.3% | 21.9% | 27.0% | 46.0% (bias −46%) | 0 |
+| Threshold 0.7 | 26.1% | 25.2% | 49.2% | 30.2% | 83 |
+| **Threshold 0.9 (chosen)** | **22.8%** | **22.3%** | **35.1%** | **34.9%** | **40** |
+| Threshold 0.95 | 22.4% | 21.9% | 31.1% | 38.3% | 23 |
 
-**Why 0.9:** the classifier is trained with `scale_pos_weight ≈ 99`, which inflates its probabilities. At 0.7, 80 properties were routed but only 23 were really above €1.9M; the other 57 received a luxury price of at least ~€1.95M. At 0.9 the luxury tier error drops from 45% to 34% while the < €1M tier barely moves (21.9% → 22.3%). The cost is the €1M–€1.9M tier (27% → 36%), where the classifier still sends some properties to the luxury model.
+**Why 0.9:** the classifier is trained with `scale_pos_weight ≈ 99`, which inflates its probabilities. At 0.7, 83 properties were routed but only 23 were really above €1.9M; the other 60 received a luxury price of at least ~€1.95M. At 0.9 the luxury tier error drops from 46% to 35% while the < €1M tier barely moves (21.9% → 22.3%). The cost is the €1M–€1.9M tier (27% → 35%), where the classifier still sends some properties to the luxury model. Overall, routing at 0.9 costs 0.5 point of MAPE against no routing (22.3% → 22.8%): it is kept for the top tier, not for the average. The threshold is not chosen on overall MAPE, which the 3,005 sub-€1M rows dominate; it is chosen on the ≥ €1.9M bias, −46% without routing and −27% at 0.9. With 35 properties in that tier, one property moves its MAPE by about 3 points, so 0.85, 0.9 and 0.95 (34.1%, 34.9%, 38.3%) are within one or two properties of each other: 0.9 is kept, not proven best. Figures from the models retrained on 2026-10-11 after the state-key fix; the previous table was measured on the models trained before it.
 
 ---
 
@@ -257,8 +257,8 @@ Validation split, by tier (`scripts/evaluate_stratified.py`):
 
 This is an **estimation tool, not a valuation system**.
 
-- **Accuracy:** about 22% average error on listings never seen in training (≈ €67k below €1M), with prices overestimated by about 5% on average.
-- **High-end properties (€1.9M+):** the luxury model learned from ~125 listings; expect errors around a third of the price, typically underestimation.
+- **Accuracy:** about 22% average error on listings never seen in training (≈ €68k below €1M), with prices overestimated by about 5% on average.
+- **High-end properties (€1.9M+):** the luxury model learned from ~125 listings; expect errors around a third of the price, typically underestimation. The standard model underprices expensive homes systematically (−46% on this tier without routing); routing halves that bias, it does not remove it.
 - **Routing trade-off:** routing helps the luxury tier but costs accuracy between €1M and €1.9M (see [Luxury Routing](#-luxury-routing)).
 - **Range:** calibrated to hold the real price 8 times in 10 on average; for a given property it can be wide (median width ≈ €210k).
 - **City names:** the training data mostly uses one language per city (e.g. *Elsene*, not *Ixelles*). A city name outside that list is accepted but ignored, and the API says so in `notes`.
