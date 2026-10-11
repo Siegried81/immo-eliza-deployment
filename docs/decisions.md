@@ -21,3 +21,16 @@ One dated entry per change that alters what a number means. Append, never rewrit
   README's metrics table re-measured with `python monitoring/metrics.py`.
 - **Revisit if:** a state appears in the data that is in neither dictionary —
   `tests/test_predict.py::TestStateEncoding` fails on it.
+
+## 2026-10-11 — the routing table follows the retrained models
+
+`scripts/evaluate_stratified.py` was re-run on the validation split (3,150 rows)
+with the models retrained after the state-key fix and committed in `bc8e6b1`.
+Every cell of the "Luxury Routing" table moved by a few tenths; the choice of
+0.9 holds for the same reason as before (the luxury tier falls from 46% to 35%
+MAPE while the < €1M tier moves 21.9% → 22.3%). One thing the new run states
+that the old table did not: against no routing, 0.9 costs 0.5 point of overall
+MAPE (22.3% → 22.8%) — routing is kept for the top tier, not for the average,
+and the README now says so. The routed counts are 83 / 40 / 23 at 0.7 / 0.9 /
+0.95 (were 80 / 42 / 24).
+

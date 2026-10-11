@@ -244,12 +244,12 @@ Validation split, by tier (`scripts/evaluate_stratified.py`):
 
 | Routing | Overall MAPE | < €1M | €1M–€1.9M | ≥ €1.9M (35) | Rows routed |
 |---|---:|---:|---:|---:|---:|
-| No routing | 22.4% | 21.9% | 27.4% | 45.0% (bias −45%) | 0 |
-| Threshold 0.7 | 26.0% | 25.0% | 49.9% | 29.6% | 80 |
-| **Threshold 0.9 (chosen)** | **22.9%** | **22.3%** | **36.2%** | **34.3%** | **42** |
-| Threshold 0.95 | 22.5% | 22.0% | 32.2% | 38.3% | 24 |
+| No routing | 22.3% | 21.9% | 27.0% | 46.0% (bias −46%) | 0 |
+| Threshold 0.7 | 26.1% | 25.2% | 49.2% | 30.2% | 83 |
+| **Threshold 0.9 (chosen)** | **22.8%** | **22.3%** | **35.1%** | **34.9%** | **40** |
+| Threshold 0.95 | 22.4% | 21.9% | 31.1% | 38.3% | 23 |
 
-**Why 0.9:** the classifier is trained with `scale_pos_weight ≈ 99`, which inflates its probabilities. At 0.7, 80 properties were routed but only 23 were really above €1.9M; the other 57 received a luxury price of at least ~€1.95M. At 0.9 the luxury tier error drops from 45% to 34% while the < €1M tier barely moves (21.9% → 22.3%). The cost is the €1M–€1.9M tier (27% → 36%), where the classifier still sends some properties to the luxury model.
+**Why 0.9:** the classifier is trained with `scale_pos_weight ≈ 99`, which inflates its probabilities. At 0.7, 83 properties were routed but only 23 were really above €1.9M; the other 60 received a luxury price of at least ~€1.95M. At 0.9 the luxury tier error drops from 46% to 35% while the < €1M tier barely moves (21.9% → 22.3%). The cost is the €1M–€1.9M tier (27% → 35%), where the classifier still sends some properties to the luxury model. Overall, routing at 0.9 costs 0.5 point of MAPE against no routing (22.3% → 22.8%): it is kept for the top tier, not for the average. Figures from the models retrained on 2026-10-11 after the state-key fix; the previous table was measured on the models trained before it.
 
 ---
 
