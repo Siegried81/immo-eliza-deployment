@@ -1,8 +1,8 @@
 {
  "target_coverage": 0.8,
- "log_margin": 0.04652573894217937,
- "calibration_rows": 1552,
+ "log_margin": 0.04453191876545759,
+ "calibration_rows": 1554,
  "check_rows": 1556,
- "check_coverage_raw": 0.7044,
- "check_coverage_calibrated": 0.7757
+ "check_coverage_raw": 0.7069,
+ "check_coverage_calibrated": 0.7783
 }
