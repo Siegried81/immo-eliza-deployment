@@ -152,7 +152,7 @@ Tests also wrote every request into `monitoring/logs.json`, polluting the drift 
 docker compose up --build
 ```
 
-App available at `http://localhost:8501`.
+App available at `http://localhost:8502`.
 
 ### Method 2 — Manual (development)
 

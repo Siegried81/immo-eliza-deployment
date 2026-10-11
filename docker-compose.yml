@@ -1,4 +1,5 @@
-# Local stack: API on http://localhost:8000, UI on http://localhost:8501.
+# Local stack: API on http://localhost:8000, UI on http://localhost:8502.
+# Host port 8502, not 8501: other local Streamlit stacks already publish 8501.
 # No source volumes: mounting ./api over /app hid src/, monitoring/ and models/.
 services:
   api:
@@ -16,7 +17,7 @@ services:
       dockerfile: streamlit/Dockerfile
     container_name: immo-ui
     ports:
-      - "8501:10000"
+      - "8502:10000"
     environment:
       # Service name on the compose network; localhost would be the UI container itself.
       - API_URL=http://api:8000
