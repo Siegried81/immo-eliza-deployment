@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 import api.app
 from api.app import app
 from api.predict import MODEL_DIR, engine
-from src.features import load_vocabulary, to_training_vocabulary
+from src.features import CITY_ALIASES, load_vocabulary, to_training_vocabulary
 from src.train import conformal_margin
 
 client = TestClient(app)
@@ -165,3 +165,48 @@ class TestStateEncoding:
         for state in VOCABULARY["property_states"]:
             assert state in STATE_MAPPING, state
             assert state in ENERGY_MEAN_BY_STATE, state
+
+class TestCityAliases:
+    """A city typed in the other national language must reach the model."""
+
+    @pytest.mark.parametrize("typed, province, expected", [
+        ("Anvers", "Antwerp", "Antwerp"),
+        ("Antwerpen", "Antwerp", "Antwerp"),
+        ("Gand", "East Flanders", "Gent"),
+        ("Ghent", "East Flanders", "Gent"),
+        ("Bruges", "West Flanders", "Brugge"),
+        ("Courtrai", "West Flanders", "Kortrijk"),
+        ("Luik", "Liège", "Liege"),
+        ("Bergen", "Hainaut", "Mons"),
+        ("Namen", "Namur", "Namur"),
+        ("Doornik", "Hainaut", "Tournai"),
+        ("Louvain", "Flemish Brabant", "Leuven"),
+        ("Malines", "Antwerp", "Mechelen"),
+        ("Waver", "Walloon Brabant", "Wavre"),
+        ("Nijvel", "Walloon Brabant", "Nivelles"),
+        ("Bruxelles", "Brussels", "Brussels"),
+        ("Ixelles", "Brussels", "Elsene"),
+        ("Uccle", "Brussels", "Ukkel"),
+        ("Woluwe-Saint-Pierre", "Brussels", "Sint-Pieters-Woluwe"),
+    ])
+    def test_alias_resolves_to_the_training_spelling(self, typed, province, expected):
+        data, notes = to_training_vocabulary(
+            {"property_type": "house", "province": province, "city": typed}, VOCABULARY)
+        assert data["city"] == expected
+        assert not any("does not appear in the training data" in n for n in notes)
+
+    def test_every_alias_points_at_a_known_city(self):
+        known = {city for info in VOCABULARY["provinces"].values() for city in info["cities"]}
+        assert {target for target in CITY_ALIASES.values()} <= known
+
+    def test_ambiguous_alias_prefers_the_users_province(self):
+        """"Forest" is Vorst in Brussels and also a Vorst in Antwerp province."""
+        data, _ = to_training_vocabulary(
+            {"property_type": "house", "province": "Brussels", "city": "Forest"}, VOCABULARY)
+        assert data["city"] == "Vorst"
+
+    def test_is_still_idempotent(self):
+        once, _ = to_training_vocabulary(
+            {"property_type": "house", "province": "Antwerp", "city": "Anvers"}, VOCABULARY)
+        twice, _ = to_training_vocabulary(once, VOCABULARY)
+        assert once == twice

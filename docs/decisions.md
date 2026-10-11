@@ -34,3 +34,18 @@ MAPE (22.3% → 22.8%) — routing is kept for the top tier, not for the average
 and the README now says so. The routed counts are 83 / 40 / 23 at 0.7 / 0.9 /
 0.95 (were 80 / 42 / 24).
 
+## 2026-10-11 — a city typed in the other national language reaches the model
+
+The training data keeps one spelling per Belgian municipality (mostly the Dutch
+name in Flanders and Brussels, the French one in Wallonia, a few English ones).
+A user typing "Ixelles", "Luik" or "Gand" got "city not in the training data" and
+an estimate without the city, for cities the models know. `CITY_ALIASES` maps 80
+French/Dutch/English names to the spelling in `models/categories.json`; the
+user's province is still preferred when a target name exists in two provinces.
+
+Taken from the branch `merge/app-overhaul-into-main`, which fixed the state keys
+the other way (underscores) and could not be merged over the space-keyed fix
+already on main. Only the alias table, its lookup and its tests were ported.
+No model, metric or encoding changed. Tests: 36 -> 57 passed (the README said
+31; re-measured).
+
