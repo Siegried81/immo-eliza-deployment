@@ -249,7 +249,7 @@ Validation split, by tier (`scripts/evaluate_stratified.py`):
 | **Threshold 0.9 (chosen)** | **22.8%** | **22.3%** | **35.1%** | **34.9%** | **40** |
 | Threshold 0.95 | 22.4% | 21.9% | 31.1% | 38.3% | 23 |
 
-**Why 0.9:** the classifier is trained with `scale_pos_weight ≈ 99`, which inflates its probabilities. At 0.7, 83 properties were routed but only 23 were really above €1.9M; the other 60 received a luxury price of at least ~€1.95M. At 0.9 the luxury tier error drops from 46% to 35% while the < €1M tier barely moves (21.9% → 22.3%). The cost is the €1M–€1.9M tier (27% → 35%), where the classifier still sends some properties to the luxury model. Overall, routing at 0.9 costs 0.5 point of MAPE against no routing (22.3% → 22.8%): it is kept for the top tier, not for the average. Figures from the models retrained on 2026-10-11 after the state-key fix; the previous table was measured on the models trained before it.
+**Why 0.9:** the classifier is trained with `scale_pos_weight ≈ 99`, which inflates its probabilities. At 0.7, 83 properties were routed but only 23 were really above €1.9M; the other 60 received a luxury price of at least ~€1.95M. At 0.9 the luxury tier error drops from 46% to 35% while the < €1M tier barely moves (21.9% → 22.3%). The cost is the €1M–€1.9M tier (27% → 35%), where the classifier still sends some properties to the luxury model. Overall, routing at 0.9 costs 0.5 point of MAPE against no routing (22.3% → 22.8%): it is kept for the top tier, not for the average. The threshold is not chosen on overall MAPE, which the 3,005 sub-€1M rows dominate; it is chosen on the ≥ €1.9M bias, −46% without routing and −27% at 0.9. With 35 properties in that tier, one property moves its MAPE by about 3 points, so 0.85, 0.9 and 0.95 (34.1%, 34.9%, 38.3%) are within one or two properties of each other: 0.9 is kept, not proven best. Figures from the models retrained on 2026-10-11 after the state-key fix; the previous table was measured on the models trained before it.
 
 ---
 
@@ -258,7 +258,7 @@ Validation split, by tier (`scripts/evaluate_stratified.py`):
 This is an **estimation tool, not a valuation system**.
 
 - **Accuracy:** about 22% average error on listings never seen in training (≈ €68k below €1M), with prices overestimated by about 5% on average.
-- **High-end properties (€1.9M+):** the luxury model learned from ~125 listings; expect errors around a third of the price, typically underestimation.
+- **High-end properties (€1.9M+):** the luxury model learned from ~125 listings; expect errors around a third of the price, typically underestimation. The standard model underprices expensive homes systematically (−46% on this tier without routing); routing halves that bias, it does not remove it.
 - **Routing trade-off:** routing helps the luxury tier but costs accuracy between €1M and €1.9M (see [Luxury Routing](#-luxury-routing)).
 - **Range:** calibrated to hold the real price 8 times in 10 on average; for a given property it can be wide (median width ≈ €210k).
 - **City names:** the training data mostly uses one language per city (e.g. *Elsene*, not *Ixelles*). A city name outside that list is accepted but ignored, and the API says so in `notes`.
