@@ -4,7 +4,7 @@ Deployment phase of the **Immo Eliza Machine Learning** project: a REST API + we
 
 - 🚀 FastAPI backend + 🎨 Streamlit frontend
 - 🤖 XGBoost regression, with a luxury-segment model + routing classifier
-- ✅ Automated pytest suite (88 tests, API and UI, no network, run in CI)
+- ✅ Automated pytest suite (89 tests, API and UI, no network, run in CI)
 - 📊 Prediction logging, PSI-based drift detection
 - 🔎 Audited end to end: [10 bugs found and fixed](#-bugs-found-and-fixed), including one that made the model ignore property type and province and a luxury model that always answered €1.9M
 - 📘 [Technical deep dive](docs/technical_deep_dive.md): how each model, the routing and the price range work, why, and what is still weak
@@ -142,7 +142,7 @@ An end-to-end audit of the deployed service (not just the notebook metrics) foun
 | 7 | `src/train.py` clipped prices at the 99th percentile, then trained the luxury regressor on rows *above* that same percentile. | Every luxury target was €1.9M: **the luxury model answered €1.9M for every property**, so a 400 m² Brussels house jumped from ~€640k (300 m²) to €1.9M. | The luxury regressor is trained on unclipped prices. A test fails if it ever becomes constant again. |
 | 8 | The "true holdout" in `metrics.py` and `evaluate_stratified.py` (rows absent from `training_baseline.csv`) still contained 3,938 of its 4,944 rows from the training split, including 23 of the 29 €3M+ properties. | Metrics were optimistic (16.8% MAPE instead of 22.4%) and rewarded memorisation, so the routing threshold was tuned on training data. | Both scripts score `train.py`'s validation split (3,150 rows no model was fitted on); the threshold was re-chosen there (0.7 → 0.9). |
 | 9 | The committed `pipeline.joblib` could not be reproduced by `src/train.py`. | No way to know how the deployed model was built. | All five artifacts are retrained by `src/train.py` (same validation MAPE: 22.42% → 22.39%) and two runs give identical models. |
-| 10 | The "80%" price range (10th–90th percentile models) held the real price only ~71% of the time on unseen listings. | Users were told the range was more reliable than it is. | Conformalized quantile regression: `train.py` widens both bounds by a margin computed on half of the validation split and measures the result on the other half (70.7% → 77.8%, `models/interval_calibration.json`; 79.9% on average over 200 random halvings). |
+| 10 | The "80%" price range (10th–90th percentile models) held the real price only ~71% of the time on unseen listings. | Users were told the range was more reliable than it is. | Conformalized quantile regression: `train.py` widens both bounds by a margin computed on half of the validation split and measures the result on the other half (70.7% → 77.9%, `models/interval_calibration.json`; 80.1% on average over 200 random halvings). |
 
 Tests also wrote every request into `monitoring/logs.json`, polluting the drift report; logging is now disabled in tests.
 
@@ -229,37 +229,37 @@ All figures are measured on `train.py`'s **validation split**: 3,150 listings no
 
 | Metric | Value |
 |---|---:|
-| MAE | €92,632 |
-| RMSE | €225,823 |
-| MAPE | 22.34% |
-| Bias | +4.62% (overestimation) |
+| MAE | €92,685 |
+| RMSE | €227,518 |
+| MAPE | 22.52% |
+| Bias | +5.06% (overestimation) |
 
 | Tier | N | MAE | MAPE |
 |---|---:|---:|---:|
-| < €1M | 3,005 | €67,657 | 21.89% |
-| €1M–€1.9M | 110 | €372,003 | 27.01% |
-| €1.9M+ | 35 | €1,358,850 | 46.01% |
+| < €1M | 3,005 | €67,693 | 22.09% |
+| €1M–€1.89M | 109 | €371,501 | 27.10% |
+| €1.89M+ | 36 | €1,334,598 | 45.07% |
 
-The standard model is trained on prices clipped to the 1st–99th percentile (€1.9M at the top), so it cannot predict above that: the worst errors are €5M–€6.5M properties predicted under €2M. That is what the luxury model is for.
+The standard model is trained on prices clipped to the 1st–99th percentile of the training rows (€68,475 to €1,890,000), so it cannot predict above €1.89M. That is what the luxury model is for.
 
-**Prediction interval:** standard-segment predictions come with a 10th–90th percentile range from two extra `XGBRegressor` models (`objective="reg:quantileerror"`), returned as `prediction_interval: {lower, upper}`. The raw models were too narrow: on unseen listings they held the real price only ~71% of the time. `train.py` now calibrates them with **conformalized quantile regression** (CQR): on half of the validation split (standard-routed rows, real unclipped prices) it finds the log-scale margin that makes 80% of prices fall inside, saves it to `models/interval_calibration.json`, and the API widens both bounds by it (currently ×1.05 / ÷1.05). On the other half, never used to set the margin, coverage goes from 70.7% to 77.8%. Not available for the luxury segment (too few rows for a stable quantile fit).
+**Prediction interval:** standard-segment predictions come with a 10th–90th percentile range from two extra `XGBRegressor` models (`objective="reg:quantileerror"`), returned as `prediction_interval: {lower, upper}`. The raw models were too narrow: on unseen listings they held the real price only ~71% of the time. `train.py` now calibrates them with **conformalized quantile regression** (CQR): on half of the validation split (standard-routed rows, real unclipped prices) it finds the log-scale margin that makes 80% of prices fall inside, saves it to `models/interval_calibration.json`, and the API widens both bounds by it (currently ×1.05 / ÷1.05). On the other half, never used to set the margin, coverage goes from 70.7% to 77.9% (1,555 rows). Not available for the luxury segment (too few rows for a stable quantile fit).
 
 ---
 
 ## 🏛️ Luxury Routing
 
-A routing classifier estimates whether a property is in the top 1% of prices (above €1.9M); above the routing threshold, a dedicated luxury regressor trained on those ~125 listings prices it instead of the standard model.
+A routing classifier estimates whether a property is in the top 1% of prices (above €1,890,000, the 99th percentile of the training rows); above the routing threshold, a dedicated luxury regressor trained on those 125 listings prices it instead of the standard model.
 
 Validation split, by tier (`scripts/evaluate_stratified.py`):
 
-| Routing | Overall MAPE | < €1M | €1M–€1.9M | ≥ €1.9M (35) | Rows routed |
+| Routing | Overall MAPE | < €1M | €1M–€1.89M | ≥ €1.89M (36) | Rows routed |
 |---|---:|---:|---:|---:|---:|
-| No routing | 22.3% | 21.9% | 27.0% | 46.0% (bias −46%) | 0 |
-| Threshold 0.7 | 26.1% | 25.2% | 49.2% | 30.2% | 83 |
-| **Threshold 0.9 (chosen)** | **22.8%** | **22.3%** | **35.1%** | **34.9%** | **40** |
-| Threshold 0.95 | 22.4% | 21.9% | 31.1% | 38.3% | 23 |
+| No routing | 22.5% | 22.1% | 27.1% | 45.1% (bias −45%) | 0 |
+| Threshold 0.7 | 26.1% | 25.2% | 49.6% | 30.4% | 84 |
+| **Threshold 0.9 (chosen)** | **23.0%** | **22.4%** | **35.3%** | **35.8%** | **39** |
+| Threshold 0.95 | 22.8% | 22.3% | 32.2% | 38.6% | 26 |
 
-**Why 0.9:** the classifier is trained with `scale_pos_weight ≈ 99`, which inflates its probabilities. At 0.7, 83 properties were routed but only 23 were really above €1.9M; the other 60 received a luxury price of at least ~€1.95M. At 0.9 the luxury tier error drops from 46% to 35% while the < €1M tier barely moves (21.9% → 22.3%). The cost is the €1M–€1.9M tier (27% → 35%), where the classifier still sends some properties to the luxury model. Overall, routing at 0.9 costs 0.5 point of MAPE against no routing (22.3% → 22.8%): it is kept for the top tier, not for the average. The threshold is not chosen on overall MAPE, which the 3,005 sub-€1M rows dominate; it is chosen on the ≥ €1.9M bias, −46% without routing and −27% at 0.9. With 35 properties in that tier, one property moves its MAPE by about 3 points, so 0.85, 0.9 and 0.95 (34.1%, 34.9%, 38.3%) are within one or two properties of each other: 0.9 is kept, not proven best. Figures from the models retrained on 2026-10-11 after the state-key fix; the previous table was measured on the models trained before it.
+**Why 0.9:** the classifier is trained with `scale_pos_weight ≈ 97`, which inflates its probabilities. At 0.7, 84 properties were routed but only 22 were really at or above €1.89M; the other 62 received a luxury price of at least ~€1.95M. At 0.9 the luxury tier error drops from 45% to 36% while the < €1M tier barely moves (22.1% → 22.4%). The cost is the €1M–€1.89M tier (27% → 35%), where the classifier still sends some properties to the luxury model. Overall, routing at 0.9 costs 0.5 point of MAPE against no routing (22.5% → 23.0%): it is kept for the top tier, not for the average. The threshold is not chosen on overall MAPE, which the 3,005 sub-€1M rows dominate; it is chosen on the ≥ €1.89M bias, −45% without routing and −29% at 0.9. With 36 properties in that tier, one property moves its MAPE by about 3 points, so 0.85, 0.9 and 0.95 (34.3%, 35.8%, 38.6%) are within one or two properties of each other: 0.9 is kept, not proven best. Figures from the models retrained on 2026-10-12 with the clip and luxury thresholds taken on the training rows (`docs/decisions.md`).
 
 ---
 
@@ -267,10 +267,10 @@ Validation split, by tier (`scripts/evaluate_stratified.py`):
 
 This is an **estimation tool, not a valuation system**.
 
-- **Accuracy:** as deployed (routing at 0.9), about 23% average error on listings never seen in training (22.8%); below €1M it is 22.3% (≈ €70k), with prices overestimated by about 7% (+6.6%). Figures from `scripts/evaluate_stratified.py`; the standard model alone is in [Model Performance](#-model-performance--monitoring).
-- **High-end properties (€1.9M+):** the luxury model learned from ~125 listings; expect errors around a third of the price, typically underestimation. The standard model underprices expensive homes systematically (−46% on this tier without routing); routing halves that bias, it does not remove it.
-- **Routing trade-off:** routing helps the luxury tier but costs accuracy between €1M and €1.9M (see [Luxury Routing](#-luxury-routing)).
-- **Range:** calibrated to hold the real price 8 times in 10 on average; for a given property it can be wide (median width ≈ €210k).
+- **Accuracy:** as deployed (routing at 0.9), about 23% average error on listings never seen in training (23.0%); below €1M it is 22.4% (≈ €70k), with prices overestimated by about 7% (+7.1%). Figures from `scripts/evaluate_stratified.py`; the standard model alone is in [Model Performance](#-model-performance--monitoring).
+- **High-end properties (€1.89M+):** the luxury model learned from 125 listings; expect errors around a third of the price, typically underestimation. The standard model underprices expensive homes systematically (−45% on this tier without routing); routing reduces that bias to −29%, it does not remove it.
+- **Routing trade-off:** routing helps the luxury tier but costs accuracy between €1M and €1.89M (see [Luxury Routing](#-luxury-routing)).
+- **Range:** calibrated to hold the real price 8 times in 10 on average; for a given property it can be wide (median width ≈ €213k).
 - **City names:** the training data keeps one spelling per municipality (e.g. *Elsene*, not *Ixelles*). `CITY_ALIASES` in `src/features.py` maps 80 French, Dutch and English names to that spelling; a name outside both lists is accepted but ignored, and the API says so in `notes`.
 
 These limitations are documented here and surfaced in the Streamlit app as a disclaimer next to each prediction, plus a flag when routed to the luxury model.
@@ -313,7 +313,7 @@ pip install pytest httpx
 pytest
 ```
 
-Expected: `88 passed`, offline (the UI tests mock the API; prediction logging is disabled).
+Expected: `89 passed`, offline (the UI tests mock the API; prediction logging is disabled).
 
 - `test_app.py`: health check, valid prediction, invalid postcode (422).
 - `test_predict.py`: vocabulary mapping (aliases, idempotence, unknown and rare cities, unknown categories), real-model behaviour (house ≠ apartment, province and condition move the price, the luxury model is not constant), luxury responses without a range, 422 on unknown province, conformal margin reaching its target coverage and applied by the engine.
@@ -326,9 +326,8 @@ Expected: `88 passed`, offline (the UI tests mock the API; prediction logging is
 
 ## 🚧 Future Improvements
 
-- **A softer switch than the hard threshold**, but not the obvious ones: blending both models with the classifier's probability was measured and is worse (`scripts/evaluate_routing_blend.py`, validation split). With the raw probability the €1.9M+ tier improves (34.9% → 23.8% MAPE) but the < €1M tier goes from +6.6% to +19.6% bias (31.3% MAPE); with an isotonic-calibrated probability the €1M–€1.9M tier improves (35.1% → 28.7%) and the €1.9M+ tier gets worse (34.9% → 36.4%). The 0.9 threshold stays.
+- **A softer switch than the hard threshold**, but not the obvious ones: blending both models with the classifier's probability was measured and is worse (`scripts/evaluate_routing_blend.py`, validation split). With the raw probability the €1.89M+ tier improves (35.8% → 24.2% MAPE) but the < €1M tier goes from +7.1% to +19.9% bias (31.4% MAPE); with an isotonic-calibrated probability the €1M–€1.89M tier improves (35.3% → 27.7%) and the €1.89M+ tier gets slightly worse (35.8% → 36.0%). The 0.9 threshold stays.
 - **Persist the prediction log** on Render (a disk behind `PREDICTION_LOG_PATH`), then read the first drift report on real traffic.
-- **Set the clipping and luxury thresholds on the training split only**, at the next retraining (see the deep dive, section 8).
 - **Refresh the data**: one scrape, no re-scrape pipeline.
 
 ---
@@ -343,7 +342,7 @@ XGBoost · scikit-learn · category_encoders · FastAPI · Streamlit · Pydantic
 
 This project turns a trained price model into a working service. An XGBoost model handles most predictions, while a second model and a routing classifier take over for luxury properties, using a threshold picked after testing different price tiers. Each prediction now comes with a range (not just one number), so users can see how uncertain the estimate is.
 
-Along the way, several real bugs were found and fixed: a mismatch between a stored price and a probability that quietly turned off the luxury model, an indexing bug that mixed up rows after splitting the data, and a test set that overlapped too much with the training data, making early results look better than they really were. A later end-to-end audit of the deployed service found more: the API spelled categories differently from the training data (so the model ignored property type and province), the luxury model always answered €1.9M, and the evaluation "holdout" still contained most training rows. With those fixed and every model reproducible from `train.py`, the honest figures, as deployed with routing at 0.9, are 22.8% average error overall on unseen listings, 22.3% below €1M and 34.9% for €1.9M+ properties.
+Along the way, several real bugs were found and fixed: a mismatch between a stored price and a probability that quietly turned off the luxury model, an indexing bug that mixed up rows after splitting the data, and a test set that overlapped too much with the training data, making early results look better than they really were. A later end-to-end audit of the deployed service found more: the API spelled categories differently from the training data (so the model ignored property type and province), the luxury model always answered €1.9M, and the evaluation "holdout" still contained most training rows. With those fixed and every model reproducible from `train.py`, the honest figures, as deployed with routing at 0.9, are 23.0% average error overall on unseen listings, 22.4% below €1M and 35.8% for €1.89M+ properties.
 
 The monitoring tools complete the picture. Drift detection checks whether new data still looks like the training data (it reads same-population data as stable; no production traffic has been logged durably yet), and the evaluation script tracks whether the routing decision is still working well over time. This tool does not replace a real estate expert — the app says so clearly — but it gives a solid base to keep the model useful and trustworthy after deployment.
 
