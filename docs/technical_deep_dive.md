@@ -253,11 +253,12 @@ its own change.
 - **The luxury price is set on all rows.** `luxury_price_threshold` is the 99th
   percentile of the full data, validation rows included. The effect is small
   (one threshold, not a fitted model), but it is a leak by construction.
-- **A UI figure has no source in the README.** The UI caption says prices below
-  €1M are "overestimated by about 7%"; the README only publishes the overall
-  bias (+4.62%, `monitoring/metrics.py`), not the bias of that tier. Either
-  the tier figure goes into the README's tier table, or the caption uses the
-  published one.
+- **Two scripts, two sets of figures.** `monitoring/metrics.py` scores the
+  standard model alone (below €1M: €67,657 MAE, +6.3% bias);
+  `scripts/evaluate_stratified.py` scores what the API serves, routing
+  included (below €1M at 0.9: €70,377 MAE, +6.6% bias). The UI caption and the
+  README's limitations quote the second; the README's performance table quotes
+  the first. Both are right, as long as each figure says which one it is.
 - **Luxury rows are few.** ~125 rows to fit a regressor and 35 to judge it:
   every luxury figure has a wide uncertainty that a single number hides.
 
