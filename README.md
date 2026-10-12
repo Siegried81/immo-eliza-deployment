@@ -4,7 +4,7 @@ Deployment phase of the **Immo Eliza Machine Learning** project: a REST API + we
 
 - 🚀 FastAPI backend + 🎨 Streamlit frontend
 - 🤖 XGBoost regression, with a luxury-segment model + routing classifier
-- ✅ Automated pytest suite (57 tests, API and UI, no network)
+- ✅ Automated pytest suite (65 tests, API and UI, no network, run in CI)
 - 📊 Prediction logging, PSI-based drift detection
 - 🔎 Audited end to end: [10 bugs found and fixed](#-bugs-found-and-fixed), including one that made the model ignore property type and province and a luxury model that always answered €1.9M
 - 📘 [Technical deep dive](docs/technical_deep_dive.md): how each model, the routing and the price range work, why, and what is still weak
@@ -50,6 +50,7 @@ flowchart LR
 
 ```text
 immo-eliza-deployment/
+├── .github/workflows/tests.yml  # runs the test suite on every push and PR
 ├── api/
 │   ├── __init__.py
 │   ├── app.py               # FastAPI app, request validation, luxury routing
@@ -82,6 +83,7 @@ immo-eliza-deployment/
 │   ├── conftest.py            # disables prediction logging during tests
 │   ├── test_app.py
 │   ├── test_predict.py        # vocabulary mapping + real-model behaviour
+│   ├── test_robustness.py     # failure paths: config, 500s, build year, quantile config
 │   └── test_streamlit_app.py  # UI through Streamlit's AppTest, API mocked
 ├── .streamlit/config.toml     # UI theme
 ├── .dockerignore
@@ -305,10 +307,11 @@ pip install pytest httpx
 pytest
 ```
 
-Expected: `57 passed`, offline (the UI tests mock the API; prediction logging is disabled).
+Expected: `65 passed`, offline (the UI tests mock the API; prediction logging is disabled).
 
 - `test_app.py`: health check, valid prediction, invalid postcode (422).
 - `test_predict.py`: vocabulary mapping (aliases, idempotence, unknown and rare cities, unknown categories), real-model behaviour (house ≠ apartment, province and condition move the price, the luxury model is not constant), luxury responses without a range, 422 on unknown province, conformal margin reaching its target coverage and applied by the engine.
+- `test_robustness.py`: no fallback routing threshold, no exception text in a 500, `build_year` bounded by today's date, both quantile models built from one configuration that matches the committed ones.
 - `test_streamlit_app.py`: the UI sends training-vocabulary values, renders the price and range, updates cities with the province, handles luxury, 422 and unreachable-API cases, and starts the way Streamlit Cloud runs it.
 
 ---

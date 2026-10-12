@@ -63,6 +63,23 @@ def conformal_margin(lower_log, upper_log, y_log, coverage):
     return float(np.quantile(scores, level, method="higher"))
 
 
+def quantile_regressor(alpha):
+    """
+    One bound of the price range: an XGBoost model of the `alpha` quantile of
+    the log-price. Both bounds share this configuration, so they can only
+    differ by the quantile they estimate.
+    """
+    return XGBRegressor(
+        n_estimators=800,
+        learning_rate=0.05,
+        max_depth=6,
+        objective="reg:quantileerror",
+        quantile_alpha=alpha,
+        random_state=42,
+        early_stopping_rounds=50
+    )
+
+
 def build_preprocessor():
     """
     Constructs and returns a sklearn ColumnTransformer pipeline.
@@ -111,27 +128,11 @@ def train():
     joblib.dump(Pipeline([("preprocessor", preprocessor), ("model", model)]), PIPELINE_PATH)
 
     # Prediction Interval (Quantile Regression) 
-    lower_model = XGBRegressor(
-        n_estimators=800,
-        learning_rate=0.05,
-        max_depth=6,
-        objective="reg:quantileerror",
-        quantile_alpha=QUANTILE_LOWER,
-        random_state=42,
-        early_stopping_rounds=50
-    )
+    lower_model = quantile_regressor(QUANTILE_LOWER)
     lower_model.fit(X_train_p, y_train, eval_set=[(X_val_p, y_val)], verbose=False)
     joblib.dump(Pipeline([("preprocessor", preprocessor), ("model", lower_model)]), PIPELINE_LOWER_PATH)
 
-    upper_model = XGBRegressor(
-        n_estimators=800,
-        learning_rate=0.05,
-        max_depth=6,
-        objective="reg:quantileerror",
-        quantile_alpha=QUANTILE_UPPER,
-        random_state=42,
-        early_stopping_rounds=50
-    )
+    upper_model = quantile_regressor(QUANTILE_UPPER)
     upper_model.fit(X_train_p, y_train, eval_set=[(X_val_p, y_val)], verbose=False)
     joblib.dump(Pipeline([("preprocessor", preprocessor), ("model", upper_model)]), PIPELINE_UPPER_PATH)
 
