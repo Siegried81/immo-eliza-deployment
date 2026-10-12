@@ -10,43 +10,33 @@ import json
 import sys
 import joblib
 import numpy as np
-import pandas as pd
 from pathlib import Path
-from sklearn.model_selection import train_test_split
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 SRC_DIR = BASE_DIR / "src"
 sys.path.insert(0, str(SRC_DIR))
 
-from features import add_features
-from train import SPLIT_SEED, TEST_SIZE
+from train import DATA_PATH, TARGET, load_dataset, price_tiers, split
 
-# Paths and evaluation
 PIPELINE_PATH = BASE_DIR / "models" / "pipeline.joblib"
-TEST_FILE = BASE_DIR / "data" / "clean" / "cleaned_data.json"
 LUXURY_PRICE = json.loads((BASE_DIR / "models" / "luxury_threshold.json").read_text())["luxury_price_threshold"]
 
 # Price tiers used for stratified reporting, so a handful of luxury
 # outliers can't dominate the headline metric. The top tier starts at the
 # luxury price threshold, the segment the routing classifier detects.
-PRICE_TIERS = [
-    ("< €1M", 0, 1_000_000),
-    (f"€1M - €{LUXURY_PRICE / 1e6:.1f}M", 1_000_000, LUXURY_PRICE),
-    (f"€{LUXURY_PRICE / 1e6:.1f}M+", LUXURY_PRICE, float("inf")),
-]
+PRICE_TIERS = price_tiers(LUXURY_PRICE)
 
 
-def evaluate_model(json_path):
+def evaluate_model():
     if not PIPELINE_PATH.exists():
         raise FileNotFoundError(f"Pipeline not found at: {PIPELINE_PATH}")
 
     pipeline = joblib.load(PIPELINE_PATH)
-    df = pd.read_json(json_path)
-    _, df = train_test_split(df, test_size=TEST_SIZE, random_state=SPLIT_SEED)
+    _, df = split(load_dataset())
     print(f"Validation split: {len(df)} rows\n")
 
-    actual_prices = df["price"].values
-    df_processed = add_features(df.drop(columns=["price"]))
+    actual_prices = df[TARGET].values
+    df_processed = df.drop(columns=[TARGET])
 
     preds_log = pipeline.predict(df_processed)
     preds = np.expm1(preds_log)                 # training used np.log1p, so invert with expm1
@@ -68,8 +58,8 @@ def print_metrics(label, actuals, predictions):
 
 
 if __name__ == "__main__":
-    if TEST_FILE.exists():
-        predictions, actuals = evaluate_model(TEST_FILE)
+    if DATA_PATH.exists():
+        predictions, actuals = evaluate_model()
 
         diffs = actuals - predictions
         abs_diffs = np.abs(diffs)
@@ -99,4 +89,4 @@ if __name__ == "__main__":
         for idx in worst_indices:
             print(f"Actual: €{actuals[idx]:,.2f} | Predicted: €{predictions[idx]:,.2f} | Error: €{abs_diffs[idx]:,.2f}")
     else:
-        print(f"Error: File not found at {TEST_FILE}")
+        print(f"Error: File not found at {DATA_PATH}")

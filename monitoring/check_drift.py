@@ -1,68 +1,80 @@
+"""
+PSI drift report: the logged predictions against the rows the models were
+trained on.
+
+The baseline is train.py's training split, rebuilt from data/ with the shared
+loader, so it is exactly what the models were fitted on. The live side is the
+engineered features each log entry carries (monitoring/monitor.py), the same
+columns the models read. The report says how many entries are real traffic
+and how many are generated, because a PSI computed on generated data says
+nothing about production.
+
+Run:
+    python monitoring/check_drift.py                      # the prediction log
+    python monitoring/check_drift.py monitoring/synthetic_logs.jsonl
+"""
 import sys
-import pandas as pd
-import json
+from collections import Counter
 from pathlib import Path
+
+import pandas as pd
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
+sys.path.insert(0, str(BASE_DIR / "src"))
 
-from monitoring.monitor import detect_drift
+from monitoring.monitor import detect_drift, read_logs  # noqa: E402
+from src.features import MONITORED_FEATURES  # noqa: E402
 
-FEATURES_TO_MONITOR = [
-    "build_year", "bedroom_count", "livable_surface", "total_surface",
-    "garage", "terrace", "swimming_pool", "energy_consumption_kWh_m2_year",
-    "property_state_encoded",
-    "preschool_distance_m", "train_station_distance_m", "supermarket_distance_m"
-]
+MIN_SAMPLES = 50
+MODERATE_PSI, STRONG_PSI = 0.1, 0.25
 
-def check_drift_report():
-    logs_file = BASE_DIR / "monitoring" / "logs.json"
-    baseline_file = BASE_DIR / "data" / "training_baseline.csv"
 
-    if not logs_file.exists():
-        print("Error: logs.json not found.")
+def drift_report(logs: list[dict], train_df: pd.DataFrame) -> tuple[dict, Counter]:
+    """
+    PSI per monitored feature, and the number of entries per source.
+
+    Entries without engineered features (written before the log carried them)
+    are skipped rather than guessed: their raw input lacks the encoded state.
+    """
+    usable = [entry for entry in logs if entry.get("features")]
+    sources = Counter(entry.get("source", "unknown") for entry in usable)
+    live_df = pd.DataFrame([entry["features"] for entry in usable])
+    live_df = live_df.reindex(columns=MONITORED_FEATURES).apply(pd.to_numeric, errors="coerce")
+    return detect_drift(train_df[MONITORED_FEATURES], live_df), sources
+
+
+def status(psi_score: float | None) -> str:
+    """Usual PSI reading: below 0.1 stable, up to 0.25 moderate, above strong."""
+    if psi_score is None:
+        return "no live data"
+    if psi_score > STRONG_PSI:
+        return "STRONG DRIFT"
+    return "Moderate" if psi_score > MODERATE_PSI else "OK"
+
+
+def main(log_path: Path | None = None):
+    from train import load_dataset, split
+
+    logs = read_logs(log_path)
+    usable = sum(1 for entry in logs if entry.get("features"))
+    if usable < MIN_SAMPLES:
+        print(f"Only {usable} usable log entries; need {MIN_SAMPLES}+ for a PSI worth reading.")
         return
 
-    with open(logs_file, 'r', encoding='utf-8') as f:
-        logs = json.load(f)
+    train_df, _ = split(load_dataset())
+    results, sources = drift_report(logs, train_df)
 
-    if not logs or len(logs) < 50:
-        print(f"Warning: Only {len(logs)} samples. Need 50+ for reliability.")
-        return
+    print(f"{usable} logged predictions vs {len(train_df)} training rows "
+          f"(sources: {dict(sources)})")
+    if set(sources) != {"api"}:
+        print("Not only real traffic: this report does not describe production.")
+    print(f"{'Feature':<32} | {'PSI':<8} | Status")
+    print("-" * 60)
+    for feature, result in results.items():
+        shown = "-" if result["psi"] is None else f"{result['psi']:.4f}"
+        print(f"{feature:<32} | {shown:<8} | {status(result['psi'])}")
 
-    # Load data
-    live_df = pd.DataFrame([log['input'] for log in logs])
-    train_df = pd.read_csv(baseline_file)
-
-    # Filter to common features
-    live_df = live_df[FEATURES_TO_MONITOR]
-    train_df = train_df[FEATURES_TO_MONITOR]
-
-    print(f"Loaded {len(live_df)} live vs {len(train_df)} training samples.")
-    print("Calculating PSI...")
-    
-    drift_results = detect_drift(train_df, live_df)
-
-    print("DRIFT REPORT (PSI - Population Stability Index)")
-    print(f"{'Feature':<30} | {'PSI':<10} | {'Status'}")
-    print("-" * 70)
-
-    total_drift = False
-    for feature, result_data in drift_results.items():
-        psi_score = result_data["psi"]
-        if psi_score > 0.25:
-            total_drift = True
-            status = "🚨 STRONG DRIFT"
-        elif psi_score > 0.1:
-            status = "⚠️  Moderate"
-        else:
-            status = "✅ OK"
-        print(f"{feature:<30} | {psi_score:<10.4f} | {status}")
-
-    if total_drift:
-        print("\nATTENTION: Strong drift detected! Retraining recommended.")
-    else:
-        print("\nNo significant drift - Model is valid.")
 
 if __name__ == "__main__":
-    check_drift_report()
+    main(Path(sys.argv[1]) if len(sys.argv) > 1 else None)

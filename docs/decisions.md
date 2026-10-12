@@ -62,3 +62,34 @@ pipeline (22.8% overall, 22.3% and +6.6% below €1M, 34.9% above €1.9M); the
 conclusion said 22.9% / 22% / 34%. The bug #10 row now quotes the coverage in
 `models/interval_calibration.json` (70.7% -> 77.8%), as the interval paragraph
 already did; it said 70.4% -> 77.6%. No model or metric changed.
+
+## 2026-10-12 — the drift report measures logged features against the training split
+
+- **What:** the prediction log is JSON Lines (`monitoring/logs.jsonl`, or
+  `PREDICTION_LOG_PATH`), one line appended per prediction, carrying the
+  engineered features the models read and a `source` ("api" or "synthetic").
+  `check_drift.py` compares those features with `train.py`'s training split
+  (12,596 rows), not `data/training_baseline.csv` (10,802 rows, not the
+  training split). `generate_logs.py` writes validation rows to its own file
+  and never deletes the real log.
+- **Why:** the API logged raw input without `property_state_encoded`, so a
+  report on real traffic raised KeyError (reproduced on the previous code with
+  60 API requests); the generator deleted the real log before writing; and the
+  README's table compared random values, including a state the model does not
+  know, with a baseline that was not the training data.
+- **What changes in the numbers:** the README's PSI table. It said 7 of 12
+  features drifted strongly; on 2,000 validation rows the tooling now reads
+  every feature as stable (PSI 0.0000-0.0146). Neither table says anything
+  about production, and the README says so. No model, metric or encoding
+  changed.
+
+## 2026-10-12 — "deterministic" means on one machine
+
+Retraining in a Linux container (xgboost 3.2.0, scikit-learn 1.9.0) twice, and
+with the previous and the refactored `train.py`, gave identical models each
+time. Against the committed models, the quantile models, the routing
+classifier, `luxury_threshold.json` and `interval_calibration.json` match
+exactly, but the standard and luxury regressors differ by up to 0.38 and 0.40
+in log price on the validation rows. The README said "two runs give identical
+models" without that condition; it now says "on a given machine". The
+committed models were not replaced: the published figures are theirs.
