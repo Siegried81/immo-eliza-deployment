@@ -11,7 +11,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
-from features import add_features
+from features import CATEGORICAL_FEATURES, NUMERIC_FEATURES, add_features
 
 # Paths & Constants
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -40,6 +40,36 @@ QUANTILE_UPPER = 0.90
 # Coverage the 10th-90th percentile range is calibrated to.
 INTERVAL_COVERAGE = QUANTILE_UPPER - QUANTILE_LOWER
 INTERVAL_CALIBRATION_PATH = MODEL_DIR / "interval_calibration.json"
+
+
+def load_dataset(path=DATA_PATH):
+    """The cleaned listings with every engineered feature, as training sees them."""
+    return add_features(pd.read_json(path))
+
+
+def split(frame):
+    """
+    (train, validation) with the split every script shares, so evaluation,
+    the vocabulary export and the drift baseline all see the rows training saw.
+    """
+    return train_test_split(frame, test_size=TEST_SIZE, random_state=SPLIT_SEED)
+
+
+def clipped_log_target(prices):
+    """
+    log1p of the price clipped to its 1st-99th percentile: the target of the
+    standard and quantile models. The clip caps them at the luxury threshold,
+    which is why the luxury path exists. The percentiles are taken on every
+    row passed in, validation included when called on the full data.
+    """
+    return np.log1p(prices.clip(prices.quantile(0.01), prices.quantile(0.99)))
+
+
+def price_tiers(luxury_price):
+    """Below €1M, €1M up to the luxury price, and the luxury segment."""
+    return [("< €1M", 0, 1_000_000),
+            (f"€1M - €{luxury_price / 1e6:.1f}M", 1_000_000, luxury_price),
+            (f">= €{luxury_price / 1e6:.1f}M", luxury_price, float("inf"))]
 
 
 def calibration_halves(val_index):
@@ -88,8 +118,8 @@ def build_preprocessor():
     num = Pipeline([("imputer", SimpleImputer(strategy="median"))])
     cat = Pipeline([("imputer", SimpleImputer(strategy="most_frequent")), ("encoder", TargetEncoder())])
     return ColumnTransformer([
-        ("num", num, ["build_year", "bedroom_count", "livable_surface", "total_surface", "garage", "terrace", "swimming_pool", "energy_consumption_kWh_m2_year", "property_state_encoded", "property_age", "preschool_distance_m", "train_station_distance_m", "supermarket_distance_m"]),
-        ("cat", cat, ["property_type", "province", "city", "property_state"])
+        ("num", num, NUMERIC_FEATURES),
+        ("cat", cat, CATEGORICAL_FEATURES)
     ])
 
 
@@ -101,11 +131,12 @@ def train():
     3. Trains a luxury classification model and an optional luxury-specific regressor.
     4. Persists all models and configuration thresholds to disk.
     """
-    df = add_features(pd.read_json(DATA_PATH))
+    df = load_dataset()
     X = df.drop(columns=[TARGET])
-    y = np.log1p(df[TARGET].clip(df[TARGET].quantile(0.01), df[TARGET].quantile(0.99)))
+    y = clipped_log_target(df[TARGET])
 
-    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=TEST_SIZE, random_state=SPLIT_SEED)
+    X_train, X_val = split(X)
+    y_train, y_val = y.loc[X_train.index], y.loc[X_val.index]
     preprocessor = build_preprocessor()
     X_train_p = preprocessor.fit_transform(X_train, y_train)
     X_val_p = preprocessor.transform(X_val)

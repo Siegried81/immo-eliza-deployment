@@ -136,7 +136,7 @@ st.session_state.setdefault("history", [])
 with st.sidebar:
     st.subheader("🏠 Immo Eliza")
     st.write("Price estimates for Belgian houses and apartments, from an XGBoost model "
-             "trained on ~15,700 listings scraped from Immovlan.")
+             "trained on ~12,600 listings scraped from Immovlan, and measured on ~3,150 others.")
     if api_is_awake():
         st.success("API online", icon="🟢")
     else:

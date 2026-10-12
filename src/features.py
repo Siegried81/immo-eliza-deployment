@@ -46,6 +46,21 @@ STATE_MAPPING = {
     "NEW": 7,
 }
 
+# The model's inputs, in the order the preprocessor in src/train.py takes them.
+# Declared once so training, drift monitoring and the tests read the same list.
+NUMERIC_FEATURES = [
+    "build_year", "bedroom_count", "livable_surface", "total_surface", "garage",
+    "terrace", "swimming_pool", "energy_consumption_kWh_m2_year",
+    "property_state_encoded", "property_age", "preschool_distance_m",
+    "train_station_distance_m", "supermarket_distance_m",
+]
+CATEGORICAL_FEATURES = ["property_type", "province", "city", "property_state"]
+
+# Drift is watched on every numeric input except property_age, which is
+# CURRENT_YEAR - build_year and would repeat build_year's PSI exactly.
+MONITORED_FEATURES = [f for f in NUMERIC_FEATURES if f != "property_age"]
+
+
 def add_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Apply all feature engineering used during training and prediction.
