@@ -269,7 +269,7 @@ This is an **estimation tool, not a valuation system**.
 - **High-end properties (€1.9M+):** the luxury model learned from ~125 listings; expect errors around a third of the price, typically underestimation. The standard model underprices expensive homes systematically (−46% on this tier without routing); routing halves that bias, it does not remove it.
 - **Routing trade-off:** routing helps the luxury tier but costs accuracy between €1M and €1.9M (see [Luxury Routing](#-luxury-routing)).
 - **Range:** calibrated to hold the real price 8 times in 10 on average; for a given property it can be wide (median width ≈ €210k).
-- **City names:** the training data mostly uses one language per city (e.g. *Elsene*, not *Ixelles*). A city name outside that list is accepted but ignored, and the API says so in `notes`.
+- **City names:** the training data keeps one spelling per municipality (e.g. *Elsene*, not *Ixelles*). `CITY_ALIASES` in `src/features.py` maps 80 French, Dutch and English names to that spelling; a name outside both lists is accepted but ignored, and the API says so in `notes`.
 
 These limitations are documented here and surfaced in the Streamlit app as a disclaimer next to each prediction, plus a flag when routed to the luxury model.
 
