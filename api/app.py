@@ -5,7 +5,6 @@ Validates the request, runs the standard, luxury, routing and quantile models
 through api.predict.engine, picks the segment with the routing threshold from
 models/luxury_threshold.json and logs every prediction for drift monitoring.
 """
-import json
 import logging
 import sys
 from datetime import date
@@ -20,29 +19,16 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.append(str(BASE_DIR))
 
 from monitoring.monitor import log_prediction
-from api.predict import engine
+from api.predict import THRESHOLD_PATH, engine, load_routing_threshold, route
 
 logger = logging.getLogger(__name__)
-
-THRESHOLD_PATH = BASE_DIR / "models" / "luxury_threshold.json"
-
-
-def load_routing_threshold(path: Path = THRESHOLD_PATH) -> float:
-    """
-    Routing threshold written by src/train.py next to the models it belongs to.
-
-    No fallback: a guessed value silently changes which model prices a
-    property, so a missing file or key stops the API at start-up instead.
-    """
-    return float(json.loads(Path(path).read_text(encoding="utf-8"))["routing_probability_threshold"])
-
 
 def current_year() -> int:
     """Upper bound for build_year; a function so tests can move the calendar."""
     return date.today().year
 
 
-LUXURY_THRESHOLD = load_routing_threshold()
+LUXURY_THRESHOLD = load_routing_threshold(THRESHOLD_PATH)
 
 app = FastAPI(title="Immo Eliza API", version="1.0")
 
@@ -113,26 +99,20 @@ def predict(property_input: PropertyInput):
         raise HTTPException(status_code=422, detail=str(e))
 
     try:
-        # Routing logic based on probability threshold
-        luxury_proba = result.get("luxury_proba", 0.0)
-        is_luxury = luxury_proba >= LUXURY_THRESHOLD
-        final_prediction = result["luxury_prediction"] if is_luxury else result["prediction"]
-        segment = "luxury" if is_luxury else "standard"
-
-        log_prediction(data, final_prediction)
-
-        interval = result["prediction_interval"]
+        chosen = route(result, LUXURY_THRESHOLD)
+        log_prediction(data, chosen["prediction"], features=result.get("features"))
+        interval = chosen["prediction_interval"]
 
         return {
-            "prediction": round(float(final_prediction), 2),
-            "prediction_interval": None if is_luxury else {
+            "prediction": round(float(chosen["prediction"]), 2),
+            "prediction_interval": None if interval is None else {
                 "lower": round(interval["lower"], 2),
                 "upper": round(interval["upper"], 2)
             },
             "currency": "EUR",
             "status": "success",
-            "segment": segment,
-            "luxury_probability": round(luxury_proba, 3),
+            "segment": chosen["segment"],
+            "luxury_probability": round(result["luxury_proba"], 3),
             "notes": result["notes"],
         }
     except Exception:

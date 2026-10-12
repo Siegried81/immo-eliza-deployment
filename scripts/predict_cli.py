@@ -1,61 +1,81 @@
+"""
+Price one property from the terminal, with the same engine and routing as the API.
+
+Answers are validated by the API's own schema (api.app.PropertyInput), then
+go through api.predict (vocabulary mapping, all five models, the trained
+routing threshold, the calibrated range), so the CLI cannot answer
+differently from the service. A blank optional field takes the API's default,
+which for plot surface and distances is "missing", imputed as in training: a
+0 there is a value the models never saw.
+
+Run:
+    python scripts/predict_cli.py
+"""
 import sys
-import joblib
-import pandas as pd
-import numpy as np
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-SRC_DIR = BASE_DIR / "src"
+sys.path.insert(0, str(BASE_DIR))
 
-# Add src/ directly to sys.path
-sys.path.insert(0, str(SRC_DIR))
-from src.features import add_features, load_vocabulary, to_training_vocabulary
+from api.app import PropertyInput  # noqa: E402
+from api.predict import THRESHOLD_PATH, engine, load_routing_threshold, route  # noqa: E402
 
-PIPELINE_PATH = BASE_DIR / "models" / "pipeline.joblib"
+# (key, prompt, required). Order is the order of the questions.
+FIELDS = [
+    ("postcode", "Postcode", True),
+    ("province", "Province", True),
+    ("city", "City", True),
+    ("property_type", "Type (house/apartment)", True),
+    ("property_state", "State (e.g. NORMAL, TO RENOVATE)", False),
+    ("livable_surface", "Livable surface (m²)", True),
+    ("total_surface", "Plot surface (m²)", False),
+    ("bedroom_count", "Bedrooms", False),
+    ("build_year", "Build year", False),
+    ("garage", "Garage (1/0)", False),
+    ("terrace", "Terrace (1/0)", False),
+    ("swimming_pool", "Pool (1/0)", False),
+    ("energy_consumption_kWh_m2_year", "Energy consumption (kWh/m²/year)", False),
+    ("preschool_distance_m", "Distance to preschool (m)", False),
+    ("train_station_distance_m", "Distance to train station (m)", False),
+    ("supermarket_distance_m", "Distance to supermarket (m)", False),
+]
+TEXT_FIELDS = {"province", "city", "property_type", "property_state"}
 
 
-def get_user_input():
+def parse_answers(answers: dict) -> dict:
+    """
+    Typed answers -> engine input, through the API schema: blank optional
+    fields take its defaults and out-of-range values are rejected the same
+    way. Raises ValueError (pydantic's ValidationError is one) on bad input.
+    """
     data = {}
-    print("\n--- IMMO ELIZA: PREDICTION CLI ---")
-
-    data["postcode"] = int(input("Postcode: "))
-    data["city"] = input("City: ").capitalize()
-    data["province"] = input("Province: ")
-    data["property_type"] = input("Type (HOUSE/APARTMENT): ").upper()
-    data["property_state"] = input("State (e.g., NORMAL, NEW): ").upper()
-    data["livable_surface"] = int(input("Livable surface (m²): "))
-    data["build_year"] = int(input("Build year: ") or 2000)
-    data["bedroom_count"] = int(input("Bedrooms: ") or 1)
-    data["garage"] = int(input("Garages: ") or 0)
-    data["garden_m2"] = int(input("Garden surface (m²): ") or 0)
-    data["terrace"] = int(input("Terrace size (m²): ") or 0)
-    data["swimming_pool"] = int(input("Pool (1/0): ") or 0)
-    data["energy_consumption_kWh_m2_year"] = int(input("Energy consumption (kWh/m²/year): ") or 0)
-    data["preschool_distance_m"] = int(input("Distance to preschool (m): ") or 0)
-    data["train_station_distance_m"] = int(input("Distance to train station (m): ") or 0)
-    data["supermarket_distance_m"] = int(input("Distance to supermarket (m): ") or 0)
-
-    return data
+    for key, prompt, required in FIELDS:
+        raw = str(answers.get(key, "")).strip()
+        if not raw:
+            if required:
+                raise ValueError(f"{prompt} is required.")
+            continue
+        data[key] = raw if key in TEXT_FIELDS else int(raw)
+    return PropertyInput(**data).model_dump()
 
 
 def run_prediction():
-    if not PIPELINE_PATH.exists():
-        print(f"Error: Pipeline file not found in {PIPELINE_PATH.parent}")
+    """Ask every field, then print the price, its segment and its range."""
+    print("\n--- IMMO ELIZA: PREDICTION CLI ---  (blank = unknown)")
+    answers = {key: input(f"{prompt}: ") for key, prompt, _ in FIELDS}
+    try:
+        result = engine.predict(parse_answers(answers))
+    except ValueError as e:
+        print(f"Error: {e}")
         return
 
-    pipeline = joblib.load(PIPELINE_PATH)
-
-    # Prepare data: map the typed categories to the spellings the model was trained on
-    data, notes = to_training_vocabulary(get_user_input(), load_vocabulary())
-    for note in notes:
+    chosen = route(result, load_routing_threshold(THRESHOLD_PATH))
+    for note in result["notes"]:
         print(f"Note: {note}")
-    df = pd.DataFrame([data])
-    df = add_features(df)
-
-    # Predict
-    pred_log = pipeline.predict(df)
-
-    print(f"ESTIMATED PRICE: {np.expm1(pred_log)[0]:,.2f} €")
+    print(f"ESTIMATED PRICE: {chosen['prediction']:,.0f} € ({chosen['segment']} model)")
+    interval = chosen["prediction_interval"]
+    if interval:
+        print(f"Likely range: {interval['lower']:,.0f} € - {interval['upper']:,.0f} €")
 
 
 if __name__ == "__main__":

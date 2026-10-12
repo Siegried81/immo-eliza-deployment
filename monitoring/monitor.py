@@ -1,31 +1,75 @@
+"""
+Prediction log and Population Stability Index (PSI) for drift monitoring.
+
+The log is JSON Lines: one entry appended per prediction, so a request costs
+the same whatever the log size, and a lock keeps two concurrent requests from
+interleaving a line. Each entry carries the engineered features the models
+read (from src/features.py), which is what drift has to be measured on.
+
+The path defaults to monitoring/logs.jsonl. Set PREDICTION_LOG_PATH to a
+persistent disk in production: Render's filesystem is wiped on every deploy
+and restart, and a log that does not survive cannot be monitored.
+"""
 import json
+import os
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
 BASE_DIR = Path(__file__).resolve().parent
-LOG_FILE = BASE_DIR / "logs.json"
+DEFAULT_LOG_FILE = BASE_DIR / "logs.jsonl"
+_LOCK = threading.Lock()
 
-def log_prediction(input_data: dict, prediction: float):
-    """Store API predictions in a JSON file for model monitoring."""
-    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+def log_file() -> Path:
+    """Where predictions are logged; read at call time so tests and deploys can move it."""
+    return Path(os.getenv("PREDICTION_LOG_PATH") or DEFAULT_LOG_FILE)
+
+
+def log_prediction(input_data: dict, prediction: float, features: dict | None = None,
+                   source: str = "api", path: Path | None = None):
+    """
+    Append one prediction to the log.
+
+    `source` tells real traffic from generated data, so a drift report can say
+    which it measured. `path` overrides log_file(), for generated logs that
+    must stay out of the real one. Logging never fails a prediction: an error
+    is printed.
+    """
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "source": source,
         "input": input_data,
-        "prediction": float(prediction)
+        "features": features or {},
+        "prediction": float(prediction),
     }
     try:
-        if LOG_FILE.exists():
-            with open(LOG_FILE, "r", encoding="utf-8") as f:
-                try: logs = json.load(f)
-                except json.JSONDecodeError: logs = []
-        else: logs = []
-        logs.append(entry)
-        with open(LOG_FILE, "w", encoding="utf-8") as f:
-            json.dump(logs, f, indent=2)
+        path = Path(path) if path else log_file()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        line = json.dumps(entry, default=str) + "\n"
+        with _LOCK, open(path, "a", encoding="utf-8") as f:
+            f.write(line)
     except Exception as e:
         print(f"Error logging prediction: {e}")
+
+
+def read_logs(path: Path | None = None) -> list[dict]:
+    """Every logged entry; a line cut short by a crash is skipped, not fatal."""
+    path = Path(path) if path else log_file()
+    if not path.exists():
+        return []
+    entries = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return entries
+
 
 def psi(expected, actual, bins=10):
     """Calculate the Population Stability Index (PSI)."""
@@ -40,16 +84,14 @@ def psi(expected, actual, bins=10):
     psi_value = np.sum((expected_pct - actual_pct) * np.log(expected_pct / actual_pct))
     return float(psi_value)
 
-def calculate_psi(expected_df: pd.DataFrame, actual_df: pd.DataFrame):
-    """Wrapper to calculate PSI for all numerical columns."""
-    psi_values = {}
-    for col in expected_df.columns:
-        if col in actual_df.columns and pd.api.types.is_numeric_dtype(expected_df[col]):
-            psi_values[col] = psi(expected_df[col].dropna(), actual_df[col].dropna())
-    return psi_values
 
 def detect_drift(train_df: pd.DataFrame, live_df: pd.DataFrame, threshold=0.25):
-    """Compare training data distribution against live data."""
+    """
+    PSI of every numeric column present in both frames, flagged above `threshold`.
+
+    A column with no live value at all (say, a distance nobody fills in) gets
+    psi None rather than the NaN an empty histogram would produce.
+    """
     results = {}
 
     numerical_columns = train_df.select_dtypes(include=[np.number, bool]).columns
@@ -57,6 +99,9 @@ def detect_drift(train_df: pd.DataFrame, live_df: pd.DataFrame, threshold=0.25):
         if col in live_df.columns:
             train_data = train_df[col].dropna().astype(float)
             live_data = live_df[col].dropna().astype(float)
+            if live_data.empty:
+                results[col] = {"psi": None, "drift_detected": False}
+                continue
             score = psi(train_data, live_data)
             results[col] = {
                 "psi": score,

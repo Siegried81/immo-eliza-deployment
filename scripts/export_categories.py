@@ -19,14 +19,11 @@ import sys
 from pathlib import Path
 
 import pandas as pd
-from sklearn.model_selection import train_test_split
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR / "src"))
-from features import add_features  # noqa: E402
-from train import SPLIT_SEED, TEST_SIZE  # noqa: E402
+from train import load_dataset, split  # noqa: E402
 
-DATA_PATH = BASE_DIR / "data" / "clean" / "cleaned_data.json"
 OUTPUT_PATH = BASE_DIR / "models" / "categories.json"
 
 # Display label and accepted alternative spellings (English, French, Dutch)
@@ -48,8 +45,7 @@ PROVINCES = {
 
 def build_vocabulary(df: pd.DataFrame) -> dict:
     """Return the categories seen in the training split, with city row counts."""
-    X = add_features(df).drop(columns=["price"])
-    X_train, _ = train_test_split(X, test_size=TEST_SIZE, random_state=SPLIT_SEED)
+    X_train, _ = split(df)
 
     unknown = set(X_train["province"].unique()) - set(PROVINCES)
     if unknown:
@@ -72,7 +68,7 @@ def build_vocabulary(df: pd.DataFrame) -> dict:
 
 
 if __name__ == "__main__":
-    vocabulary = build_vocabulary(pd.read_json(DATA_PATH))
+    vocabulary = build_vocabulary(load_dataset())
     OUTPUT_PATH.write_text(json.dumps(vocabulary, ensure_ascii=False, indent=1), encoding="utf-8")
     n_cities = sum(len(p["cities"]) for p in vocabulary["provinces"].values())
     print(f"Wrote {OUTPUT_PATH} ({len(vocabulary['provinces'])} provinces, {n_cities} cities)")
