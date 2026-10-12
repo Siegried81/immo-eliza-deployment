@@ -14,3 +14,4 @@ docker-compose.yml
 data
 tests
 monitoring/logs.json
+monitoring/*.jsonl
