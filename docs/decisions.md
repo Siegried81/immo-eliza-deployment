@@ -49,3 +49,16 @@ already on main. Only the alias table, its lookup and its tests were ported.
 No model, metric or encoding changed. Tests: 36 -> 57 passed (the README said
 31; re-measured).
 
+
+## 2026-10-12 — README accuracy figures name the pipeline they measure
+
+The "Known Limitations" accuracy line quoted the standard model alone
+(€68k below €1M, +5% overall bias, `monitoring/metrics.py`) while the UI
+caption quoted the deployed pipeline with routing at 0.9 (€70k, +7% below
+€1M, `scripts/evaluate_stratified.py`). Both scripts were re-run on 2026-10-12
+on the committed models, without retraining, and every published cell still
+matched. The limitations line and the conclusion now quote the deployed
+pipeline (22.8% overall, 22.3% and +6.6% below €1M, 34.9% above €1.9M); the
+conclusion said 22.9% / 22% / 34%. The bug #10 row now quotes the coverage in
+`models/interval_calibration.json` (70.7% -> 77.8%), as the interval paragraph
+already did; it said 70.4% -> 77.6%. No model or metric changed.
