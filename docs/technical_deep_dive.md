@@ -204,17 +204,24 @@ bias rather than the overall MAPE.
   `category_encoders` are pinned to the versions they were pickled with. A
   newer `category_encoders` makes every prediction fail (README, bug #3). Any
   upgrade of those three means a retraining.
-- **Tests:** 57, offline. They cover the vocabulary mapping, the real model's
+- **Failure paths:** the routing threshold is read from
+  `models/luxury_threshold.json` with no fallback, so a missing file stops the
+  API at start-up rather than routing with a guessed value. An unexpected
+  error in `/predict` is logged with its traceback and answered with a generic
+  500, never the exception text. `build_year` is bounded by today's date, not
+  by a year written into the schema.
+- **Tests:** 65, offline, run by `.github/workflows/tests.yml` on every push
+  and pull request. They cover the vocabulary mapping, the real model's
   behaviour (house ≠ apartment, province and condition move the price, the
   luxury model is not constant), the conformal margin, the API contract and
-  the UI through Streamlit's `AppTest` with the API mocked.
+  its failure paths, and the UI through Streamlit's `AppTest` with the API
+  mocked.
 
 ---
 
 ## 8. Open issues, by point of view
 
-These are found by reading the code. They are listed, not fixed: each one is
-its own change.
+These are found by reading the code. Each one is its own change.
 
 ### Software engineering
 
@@ -229,20 +236,14 @@ its own change.
   whole JSON file on every request: cost grows with the log, two concurrent
   requests can lose an entry, and Render's filesystem is wiped on each deploy
   or restart, so real drift monitoring has no data to read.
-- **Two thresholds disagree.** `api/app.py` falls back to a routing threshold
-  of 0.6 when `luxury_threshold.json` is missing, while `train.py` writes 0.9.
-  The fallback should be the same constant, or a missing file should fail.
-- **Errors leak internals.** The catch-all in `/predict` returns `str(e)` as a
-  500 detail. The full error belongs in the server log, a generic message in
-  the response.
-- **No CI.** There is no `.github/workflows/`: the 57 tests run only when
-  someone runs them.
 - **Import paths by `sys.path` edits** in `api/app.py`, `api/predict.py` and
   `streamlit/app.py`. They work, but they are why a stray
   `streamlit/__init__.py` once shadowed the Streamlit library (README, bug #5).
-- **Hard-coded year.** `CURRENT_YEAR = 2026` in `src/features.py` and
-  `build_year le=2026` in the API: in January 2027 a new build is rejected and
-  `property_age` stops meaning what it meant in training.
+- **The training year is fixed, the calendar is not.** `CURRENT_YEAR = 2026`
+  in `src/features.py` is the reference year the models learned
+  `property_age` from, so it must stay put until a retraining. A property
+  built after 2026 is accepted but gets a negative age, a value the models
+  never saw.
 
 ### Data science
 
@@ -254,7 +255,8 @@ its own change.
   percentile of the full data, validation rows included. The effect is small
   (one threshold, not a fitted model), but it is a leak by construction.
 - **Two scripts, two sets of figures.** `monitoring/metrics.py` scores the
-  standard model alone (below €1M: €67,657 MAE, +6.3% bias);
+  standard model alone (below €1M: €67,657 MAE; the same model shows +6.3%
+  bias in `evaluate_stratified.py`'s no-routing row);
   `scripts/evaluate_stratified.py` scores what the API serves, routing
   included (below €1M at 0.9: €70,377 MAE, +6.6% bias). The UI caption and the
   README's limitations quote the second; the README's performance table quotes
@@ -264,8 +266,6 @@ its own change.
 
 ### DRY
 
-- The two quantile models are two copies of one config block, differing only
-  in `quantile_alpha`.
 - The feature list lives in `build_preprocessor()` and, separately, in
   `FEATURES_TO_MONITOR`; adding a feature means editing both.
 - The two Dockerfiles repeat the same install layers.
