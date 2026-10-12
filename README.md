@@ -4,7 +4,7 @@ Deployment phase of the **Immo Eliza Machine Learning** project: a REST API + we
 
 - 🚀 FastAPI backend + 🎨 Streamlit frontend
 - 🤖 XGBoost regression, with a luxury-segment model + routing classifier
-- ✅ Automated pytest suite (65 tests, API and UI, no network, run in CI)
+- ✅ Automated pytest suite (86 tests, API and UI, no network, run in CI)
 - 📊 Prediction logging, PSI-based drift detection
 - 🔎 Audited end to end: [10 bugs found and fixed](#-bugs-found-and-fixed), including one that made the model ignore property type and province and a luxury model that always answered €1.9M
 - 📘 [Technical deep dive](docs/technical_deep_dive.md): how each model, the routing and the price range work, why, and what is still weak
@@ -42,7 +42,7 @@ flowchart LR
     F --> C{Luxury classifier<br/>p ≥ 0.9?}
     C -- no --> M1[Standard XGBoost<br/>+ 10th/90th quantile models]
     C -- yes --> M2[Luxury XGBoost]
-    A --> L[(monitoring/logs.json)]
+    A --> L[(monitoring/logs.jsonl)]
     L --> D[PSI drift report]
     V[(models/categories.json)] --> N
     V --> S
@@ -63,14 +63,14 @@ immo-eliza-deployment/
 ├── models/                    # pickled pipelines + categories.json (training vocabulary)
 ├── monitoring/
 │   ├── __init__.py
-│   ├── check_drift.py         # PSI drift report vs. training baseline
-│   ├── generate_logs.py       # Synthetic logs for testing the monitoring pipeline
+│   ├── check_drift.py         # PSI drift report: logged features vs. training split
+│   ├── generate_logs.py       # Synthetic log (validation rows) to test the drift report
 │   ├── metrics.py             # True-holdout evaluation, by price tier
-│   └── monitor.py             # log_prediction(), PSI computation
+│   └── monitor.py             # JSON Lines prediction log, PSI computation
 ├── scripts/
 │   ├── evaluate_stratified.py  # Sweeps the luxury-routing threshold, per tier
 │   ├── export_categories.py    # Writes models/categories.json after each retraining
-│   └── predict_cli.py
+│   └── predict_cli.py          # Terminal predictions, same engine and routing as the API
 ├── src/
 │   ├── __init__.py
 │   ├── features.py            # Single source of truth for feature engineering
@@ -103,18 +103,18 @@ immo-eliza-deployment/
 |---|---|
 | `api/app.py` | FastAPI endpoints, request validation, luxury routing decision (via `luxury_threshold.json`), `/ping` keep-alive for UptimeRobot |
 | `api/predict.py` | Loads the 5 model artifacts (standard, luxury, luxury classifier, lower/upper quantile) and runs inference |
-| `monitoring/monitor.py` | Logs predictions, computes PSI drift |
-| `monitoring/check_drift.py` | Compares logs vs. training baseline, prints PSI report |
+| `monitoring/monitor.py` | Appends each prediction, with the features the models read, to a JSON Lines log (`PREDICTION_LOG_PATH` to move it); computes PSI |
+| `monitoring/check_drift.py` | PSI of the logged features against `train.py`'s training split; reports how many entries are real traffic |
 | `monitoring/metrics.py` | Scores `pipeline.joblib` on `train.py`'s **validation split**, overall and by price tier |
-| `monitoring/generate_logs.py` | Generates synthetic logs to test the monitoring pipeline |
+| `monitoring/generate_logs.py` | Writes validation rows to `monitoring/synthetic_logs.jsonl` (never the real log) to test the drift report |
 | `src/features.py` | Single source of truth for feature engineering — imported by every script to prevent train/inference skew. `to_training_vocabulary()` rewrites user input into the exact category strings the models were fitted on |
 | `models/interval_calibration.json` | Conformal margin applied to the price range, with the coverage measured before and after on held-out rows |
 | `models/categories.json` | Provinces, cities (with training row counts), property types and states the models know; read by the API and the UI |
 | `scripts/export_categories.py` | Regenerates `models/categories.json` from the training split |
-| `src/train.py` | Full training workflow: cleans data, caps outliers, trains standard model, luxury model, routing classifier, and quantile (interval) models; writes `luxury_threshold.json`. Deterministic: two runs give identical models. `TEST_SIZE`/`SPLIT_SEED` are shared with the evaluation scripts |
-| `src/optimize.py` | Optuna hyperparameter search for the standard model |
+| `src/train.py` | Full training workflow: cleans data, caps outliers, trains standard model, luxury model, routing classifier, and quantile (interval) models; writes `luxury_threshold.json`. Deterministic on a given machine: two runs give identical models (another machine can differ, see `docs/decisions.md`, 2026-10-12). `load_dataset()`, `split()`, `clipped_log_target()` and `price_tiers()` are shared with every script |
+| `src/optimize.py` | Optuna hyperparameter search, scored on exactly the setup `train.py` ships |
 | `scripts/evaluate_stratified.py` | Evaluates the full routing pipeline per price tier across routing thresholds, on the validation split — used to choose the 0.9 threshold |
-| `scripts/predict_cli.py` | CLI for manual predictions |
+| `scripts/predict_cli.py` | Terminal predictions through the API's schema, engine and routing |
 | `streamlit/app.py` | Web UI: choice lists from `categories.json`, estimate with its likely range, price per m², segment badge, caveats and a history of recent estimates |
 | `tests/` | API, vocabulary mapping, real-model behaviour and UI tests (see [Automated Testing](#-automated-testing)) |
 | `docker-compose.yml` | Orchestrates API + Streamlit containers |
@@ -175,7 +175,7 @@ API_URL=http://localhost:8003 streamlit run streamlit/app.py --server.port 8508 
 ### Method 3 — Retrain & re-evaluate
 
 ```bash
-python src/train.py                     # trains all 5 artifacts (deterministic)
+python src/train.py                     # trains all 5 artifacts (deterministic on one machine)
 python scripts/export_categories.py     # refreshes models/categories.json
 python scripts/evaluate_stratified.py   # sweeps the luxury-routing threshold on the validation split
 python monitoring/metrics.py            # standard-model metrics by tier on the validation split
@@ -277,26 +277,30 @@ These limitations are documented here and surfaced in the Streamlit app as a dis
 
 ## 📉 Drift Analysis
 
-`monitoring/check_drift.py` compares 8,000 synthetic production predictions against the 10,802-sample training set using PSI, on 12 monitored features.
+Every prediction the API serves is appended to a JSON Lines log (`monitoring/logs.jsonl`, or `PREDICTION_LOG_PATH`) with the engineered features the models read. `monitoring/check_drift.py` compares those features with `train.py`'s training split (12,596 rows) using PSI, on 12 monitored features, and says how many entries are real traffic and how many are generated.
+
+**No production traffic has been measured yet.** The API runs on Render's free tier, whose filesystem is wiped on each deploy and restart; point `PREDICTION_LOG_PATH` at a persistent disk before a drift report on real traffic means anything.
+
+What the tooling gives on 2,000 validation listings the models never trained on (`python monitoring/generate_logs.py`, then `python monitoring/check_drift.py monitoring/synthetic_logs.jsonl`). Same population as training, so every feature should read as stable, and does:
 
 | Feature | PSI | Status |
 |---|---:|:---|
-| Build Year | 0.9737 | 🚨 Strong |
-| Bedroom Count | 0.2005 | ⚠️ Moderate |
-| Livable Surface | 0.6399 | 🚨 Strong |
-| Total Surface | 0.0824 | ✅ Stable |
-| Garage | 0.1415 | ⚠️ Moderate |
-| Terrace | 0.1049 | ⚠️ Moderate |
-| Swimming Pool | 0.0003 | ✅ Stable |
-| Energy Consumption | 11.7287 | 🚨 Strong |
-| Property State (encoded) | 13.3866 | 🚨 Strong |
-| Preschool Distance | 0.5430 | 🚨 Strong |
-| Train Station Distance | 3.0922 | 🚨 Strong |
-| Supermarket Distance | 2.1685 | 🚨 Strong |
+| Build Year | 0.0146 | ✅ Stable |
+| Bedroom Count | 0.0071 | ✅ Stable |
+| Livable Surface | 0.0090 | ✅ Stable |
+| Total Surface | 0.0068 | ✅ Stable |
+| Garage | 0.0023 | ✅ Stable |
+| Terrace | 0.0000 | ✅ Stable |
+| Swimming Pool | 0.0012 | ✅ Stable |
+| Energy Consumption | 0.0068 | ✅ Stable |
+| Property State (encoded) | 0.0084 | ✅ Stable |
+| Preschool Distance | 0.0076 | ✅ Stable |
+| Train Station Distance | 0.0064 | ✅ Stable |
+| Supermarket Distance | 0.0056 | ✅ Stable |
 
-> `property_age` and `price_per_m2` are intentionally **not** monitored: `property_age` is a deterministic function of `build_year` (same PSI, redundant signal), and `price_per_m2` was excluded from the model's training features entirely (to avoid target leakage), so it isn't a meaningful drift signal for this model.
+> `property_age` is intentionally **not** monitored: it is `CURRENT_YEAR - build_year`, so its PSI repeats build year's. The list lives in `src/features.py::MONITORED_FEATURES`.
 
-**Interpretation:** 7 of 12 monitored features show strong drift (property state, energy consumption, all three distance features, build year, livable surface), so production data no longer matches the training distribution well. The service still runs and returns valid predictions, but retraining on more recent data is recommended.
+**Reading it:** below 0.1 stable, 0.1–0.25 moderate, above 0.25 strong. An earlier version of this section reported strong drift on 7 of 12 features; that table compared randomly generated values (including a state the model does not know) with an outdated baseline, so it described the generator, not production. See `docs/decisions.md`, 2026-10-12.
 
 ---
 
@@ -307,11 +311,12 @@ pip install pytest httpx
 pytest
 ```
 
-Expected: `65 passed`, offline (the UI tests mock the API; prediction logging is disabled).
+Expected: `86 passed`, offline (the UI tests mock the API; prediction logging is disabled).
 
 - `test_app.py`: health check, valid prediction, invalid postcode (422).
 - `test_predict.py`: vocabulary mapping (aliases, idempotence, unknown and rare cities, unknown categories), real-model behaviour (house ≠ apartment, province and condition move the price, the luxury model is not constant), luxury responses without a range, 422 on unknown province, conformal margin reaching its target coverage and applied by the engine.
 - `test_robustness.py`: no fallback routing threshold, no exception text in a 500, `build_year` bounded by today's date, both quantile models built from one configuration that matches the committed ones.
+- `test_monitoring_and_tools.py`: the log appends one line per prediction and loses none under concurrency, carries the features the models read, and feeds a drift report that reads same-population data as stable; the generator never touches the real log; the CLI uses the API's defaults and gives the API's price; a missing range calibration fails instead of a zero margin; the shared split, target and tiers match what training always used; the search scores the shipped setup.
 - `test_streamlit_app.py`: the UI sends training-vocabulary values, renders the price and range, updates cities with the province, handles luxury, 422 and unreachable-API cases, and starts the way Streamlit Cloud runs it.
 
 ---
@@ -319,9 +324,9 @@ Expected: `65 passed`, offline (the UI tests mock the API; prediction logging is
 ## 🚧 Future Improvements
 
 - **Calibrate the routing classifier** (or blend both models with its probability) instead of a hard threshold, to reduce the jump between the standard and luxury models.
-- **Fix `STATE_MAPPING`**: it uses `TO_RENOVATE` while the data has `TO RENOVATE`, so `property_state_encoded` was 3 ("normal") for every multi-word state during training. The categorical `property_state` column still carries the information; fixing the mapping needs a retraining.
-- **City aliases** (Ixelles/Elsene, Uccle/Ukkel…) in `categories.json`, so French and Dutch names both reach the encoder.
-- **Retrain on recent data**: 7 of 12 monitored features show strong drift.
+- **Persist the prediction log** on Render (a disk behind `PREDICTION_LOG_PATH`), then read the first drift report on real traffic.
+- **Set the clipping and luxury thresholds on the training split only**, at the next retraining (see the deep dive, section 8).
+- **Refresh the data**: one scrape, no re-scrape pipeline.
 
 ---
 
@@ -337,7 +342,7 @@ This project turns a trained price model into a working service. An XGBoost mode
 
 Along the way, several real bugs were found and fixed: a mismatch between a stored price and a probability that quietly turned off the luxury model, an indexing bug that mixed up rows after splitting the data, and a test set that overlapped too much with the training data, making early results look better than they really were. A later end-to-end audit of the deployed service found more: the API spelled categories differently from the training data (so the model ignored property type and province), the luxury model always answered €1.9M, and the evaluation "holdout" still contained most training rows. With those fixed and every model reproducible from `train.py`, the honest figures, as deployed with routing at 0.9, are 22.8% average error overall on unseen listings, 22.3% below €1M and 34.9% for €1.9M+ properties.
 
-The monitoring tools complete the picture. Drift detection checks whether new data still looks like the training data (right now, 7 out of 12 features show strong drift), and the evaluation script tracks whether the routing decision is still working well over time. This tool does not replace a real estate expert — the app says so clearly — but it gives a solid base to keep the model useful and trustworthy after deployment.
+The monitoring tools complete the picture. Drift detection checks whether new data still looks like the training data (it reads same-population data as stable; no production traffic has been logged durably yet), and the evaluation script tracks whether the routing decision is still working well over time. This tool does not replace a real estate expert — the app says so clearly — but it gives a solid base to keep the model useful and trustworthy after deployment.
 
 ---
 

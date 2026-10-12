@@ -210,7 +210,7 @@ bias rather than the overall MAPE.
   error in `/predict` is logged with its traceback and answered with a generic
   500, never the exception text. `build_year` is bounded by today's date, not
   by a year written into the schema.
-- **Tests:** 65, offline, run by `.github/workflows/tests.yml` on every push
+- **Tests:** 86, offline, run by `.github/workflows/tests.yml` on every push
   and pull request. They cover the vocabulary mapping, the real model's
   behaviour (house ≠ apartment, province and condition move the price, the
   luxury model is not constant), the conformal margin, the API contract and
@@ -225,17 +225,11 @@ These are found by reading the code. Each one is its own change.
 
 ### Software engineering
 
-- **The drift report reads synthetic data.** `monitoring/check_drift.py` reads
-  `monitoring/logs.json`, and the README's PSI table was produced from logs
-  written by `monitoring/generate_logs.py`, which draws random values (a state
-  `"good"` that is not in the vocabulary, a uniform energy, a random
-  `property_state_encoded` between 0 and 4). The table measures that
-  generator against the training data, not production. The README's
-  "production data no longer matches" reads more into it than it holds.
-- **Prediction logs do not survive on Render.** `log_prediction()` rewrites the
-  whole JSON file on every request: cost grows with the log, two concurrent
-  requests can lose an entry, and Render's filesystem is wiped on each deploy
-  or restart, so real drift monitoring has no data to read.
+- **Prediction logs do not survive on Render** unless `PREDICTION_LOG_PATH`
+  points at a persistent disk: Render's free-tier filesystem is wiped on each
+  deploy and restart. The code side is done (JSON Lines, one appended line per
+  prediction under a lock, with the engineered features); the hosting side is
+  a configuration choice.
 - **Import paths by `sys.path` edits** in `api/app.py`, `api/predict.py` and
   `streamlit/app.py`. They work, but they are why a stray
   `streamlit/__init__.py` once shadowed the Streamlit library (README, bug #5).
@@ -247,13 +241,18 @@ These are found by reading the code. Each one is its own change.
 
 ### Data science
 
-- **`src/optimize.py` tuned a different model** from the one `train.py` trains:
-  unclipped target, a different column drop list, no early stopping, a path
-  relative to the working directory. The hyperparameters it found are still
-  plausible, but they were not chosen for the model that ships.
-- **The luxury price is set on all rows.** `luxury_price_threshold` is the 99th
-  percentile of the full data, validation rows included. The effect is small
-  (one threshold, not a fitted model), but it is a leak by construction.
+- **The thresholds are set on all rows.** The 1st/99th percentile clip of the
+  target and `luxury_price_threshold` are taken on the full data, validation
+  rows included. Measured: on the training split alone the 99th percentile is
+  €1,890,000 instead of €1,900,000 and the 1st is €68,475 instead of
+  €68,500. Fixing it changes the target, the luxury labels and every model, so
+  it waits for the next retraining rather than moving the published figures.
+- **Reproducible on one machine, not across machines.** Retraining twice in the
+  same container gives identical models, and the old and new `train.py` give
+  identical models there; but the committed standard and luxury models differ
+  from that container's (up to 0.4 in log price), while the quantile models,
+  the classifier and both JSON files match exactly. XGBoost's result depends
+  on the CPU and thread count it ran on.
 - **Two scripts, two sets of figures.** `monitoring/metrics.py` scores the
   standard model alone (below €1M: €67,657 MAE; the same model shows +6.3%
   bias in `evaluate_stratified.py`'s no-routing row);
@@ -266,9 +265,9 @@ These are found by reading the code. Each one is its own change.
 
 ### DRY
 
-- The feature list lives in `build_preprocessor()` and, separately, in
-  `FEATURES_TO_MONITOR`; adding a feature means editing both.
-- The two Dockerfiles repeat the same install layers.
+- The two Dockerfiles repeat the same install layers. Kept on purpose: Render
+  builds `api/Dockerfile` by path, and a shared base image would add a build
+  step to save six lines.
 
 ### GenAI
 
@@ -288,8 +287,8 @@ LLM call could add value, with schema validation and a fallback:
   listings, not to set a price; the app says so next to every estimate.
 - **Where it is weakest is where the money is.** Above €1.9M the error is
   around a third of the price, mostly underestimation.
-- **The data ages.** One scrape, no refresh pipeline, and the drift report is
-  not yet measuring real traffic (see above). A product version needs a
+- **The data ages.** One scrape, no refresh pipeline, and no real traffic has
+  been logged durably yet (see above). A product version needs a
   scheduled re-scrape, retraining on a fixed cadence, and the same tier tables
   re-run each time.
 - **Running cost is near zero** (free tiers), and the price of that is the
