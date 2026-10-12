@@ -15,3 +15,11 @@ data
 tests
 monitoring/logs.json
 monitoring/*.jsonl
+
+# Secrets: the Dockerfiles use `COPY . .`, so without these lines a local .env
+# (API keys, tokens) would be baked into the image and published with it.
+# Pass secrets at run time instead: `docker run --env-file .env ...`.
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
