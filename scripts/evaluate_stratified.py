@@ -18,27 +18,17 @@ from pathlib import Path
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import train_test_split
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BASE_DIR / "src"))
-from features import add_features  # noqa: E402
-from train import SPLIT_SEED, TARGET, TEST_SIZE  # noqa: E402
+from train import TARGET, load_dataset, price_tiers, split  # noqa: E402
 
 MODEL_DIR = BASE_DIR / "models"
 THRESHOLDS = [0.5, 0.6, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.01]  # 1.01 = no routing
 
 
-def tiers(luxury_price: float) -> list[tuple[str, float, float]]:
-    """Below €1M, €1M up to the luxury price, and the luxury segment."""
-    return [("< €1M", 0, 1_000_000),
-            (f"€1M - €{luxury_price / 1e6:.1f}M", 1_000_000, luxury_price),
-            (f">= €{luxury_price / 1e6:.1f}M", luxury_price, float("inf"))]
-
-
 def main():
-    df = add_features(pd.read_json(BASE_DIR / "data" / "clean" / "cleaned_data.json"))
-    _, val = train_test_split(df, test_size=TEST_SIZE, random_state=SPLIT_SEED)
+    _, val = split(load_dataset())
     actual = val[TARGET].to_numpy()
     X_val = val.drop(columns=[TARGET])
     print(f"Validation split: {len(val)} rows (never used to fit any model)\n")
@@ -52,7 +42,7 @@ def main():
         routed = proba >= threshold
         predicted = np.where(routed, luxury, standard)
         rows = []
-        for name, low, high in tiers(luxury_price):
+        for name, low, high in price_tiers(luxury_price):
             mask = (actual >= low) & (actual < high)
             err = predicted[mask] - actual[mask]
             rows.append({

@@ -32,6 +32,7 @@ ENV/
 Thumbs.db
 
 monitoring/logs.json
+monitoring/*.jsonl
 *.log
 
 .streamlit/secrets.toml
