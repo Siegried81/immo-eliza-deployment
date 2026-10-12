@@ -7,6 +7,9 @@ services:
     build:
       context: .
       dockerfile: api/Dockerfile
+    # build + image: `docker compose up --build` builds from source and tags it with the
+    # Docker Hub name; `docker compose pull` downloads the published image instead.
+    image: ${DOCKERHUB_USERNAME:-siegried}/immo-eliza-api:latest
     container_name: immo-api
     ports:
       - "8003:8000"
@@ -16,6 +19,7 @@ services:
     build:
       context: .
       dockerfile: streamlit/Dockerfile
+    image: ${DOCKERHUB_USERNAME:-siegried}/immo-eliza-ui:latest
     container_name: immo-ui
     ports:
       - "8508:10000"
