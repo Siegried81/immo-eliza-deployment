@@ -7,6 +7,7 @@ Deployment phase of the **Immo Eliza Machine Learning** project: a REST API + we
 - ✅ Automated pytest suite (57 tests, API and UI, no network)
 - 📊 Prediction logging, PSI-based drift detection
 - 🔎 Audited end to end: [10 bugs found and fixed](#-bugs-found-and-fixed), including one that made the model ignore property type and province and a luxury model that always answered €1.9M
+- 📘 [Technical deep dive](docs/technical_deep_dive.md): how each model, the routing and the price range work, why, and what is still weak
 
 ---
 
@@ -55,6 +56,9 @@ immo-eliza-deployment/
 │   ├── Dockerfile
 │   └── predict.py            # Loads model artifacts, runs inference
 ├── data/
+├── docs/
+│   ├── decisions.md           # dated record of changes to what a number means
+│   └── technical_deep_dive.md # how it works, why, open issues
 ├── models/                    # pickled pipelines + categories.json (training vocabulary)
 ├── monitoring/
 │   ├── __init__.py
@@ -112,6 +116,8 @@ immo-eliza-deployment/
 | `streamlit/app.py` | Web UI: choice lists from `categories.json`, estimate with its likely range, price per m², segment badge, caveats and a history of recent estimates |
 | `tests/` | API, vocabulary mapping, real-model behaviour and UI tests (see [Automated Testing](#-automated-testing)) |
 | `docker-compose.yml` | Orchestrates API + Streamlit containers |
+| `docs/technical_deep_dive.md` | How it works and why: vocabulary contract, training, routing, conformal range, evaluation, open issues by point of view |
+| `docs/decisions.md` | Dated record of every change that altered what a number means |
 
 > **Legacy note:** `pipeline.joblib` now bundles preprocessor + model in one `sklearn.Pipeline`, replacing the old separate `best_XGBoost.json` / `preprocessor.joblib` files.
 
