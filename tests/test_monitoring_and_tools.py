@@ -31,7 +31,7 @@ from scripts.predict_cli import parse_answers  # noqa: E402
 from src.features import (CATEGORICAL_FEATURES, MONITORED_FEATURES,  # noqa: E402
                           NUMERIC_FEATURES)
 from src.train import (DATA_PATH, SPLIT_SEED, TEST_SIZE, build_preprocessor,  # noqa: E402
-                       clipped_log_target, price_tiers, split)
+                       clipped_log_target, price_bounds, price_tiers, split)
 
 APARTMENT = {"postcode": 1050, "province": "Brussels", "city": "Elsene",
              "property_type": "apartment", "livable_surface": 85}
@@ -183,10 +183,17 @@ class TestSharedTrainingHelpers:
         assert new_train.index.equals(old_train.index) and new_val.index.equals(old_val.index)
         assert y.loc[new_train.index].equals(old_y_train)
 
-    def test_clipped_log_target_is_the_training_target(self):
+    def test_clipped_log_target_clips_to_the_given_bounds(self):
         prices = pd.Series(np.linspace(10_000, 5_000_000, 1000))
-        expected = np.log1p(prices.clip(prices.quantile(0.01), prices.quantile(0.99)))
-        assert clipped_log_target(prices).equals(expected)
+        expected = np.log1p(prices.clip(50_000, 2_000_000))
+        assert clipped_log_target(prices, (50_000, 2_000_000)).equals(expected)
+
+    def test_bounds_ignore_validation_prices(self):
+        # Validation prices far above the training ones must not move the bounds.
+        train = pd.Series(np.linspace(10_000, 1_000_000, 800))
+        everything = pd.concat([train, pd.Series([9e9] * 200)], ignore_index=True)
+        assert price_bounds(train) == price_bounds(everything.iloc[:800])
+        assert price_bounds(train) != price_bounds(everything)
 
     def test_price_tiers_cover_every_price_once(self):
         tiers = price_tiers(1_900_000)

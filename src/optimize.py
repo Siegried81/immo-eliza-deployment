@@ -14,14 +14,15 @@ Run (optuna is not a runtime dependency):
 import numpy as np
 from xgboost import XGBRegressor
 
-from train import TARGET, build_preprocessor, clipped_log_target, load_dataset, split
+from train import TARGET, build_preprocessor, clipped_log_target, load_dataset, price_bounds, split
 
 
 def prepare():
     """Preprocessed training and validation arrays, as train.py builds them."""
     df = load_dataset()
-    X, y = df.drop(columns=[TARGET]), clipped_log_target(df[TARGET])
+    X = df.drop(columns=[TARGET])
     X_train, X_val = split(X)
+    y = clipped_log_target(df[TARGET], price_bounds(df.loc[X_train.index, TARGET]))
     y_train, y_val = y.loc[X_train.index], y.loc[X_val.index]
     preprocessor = build_preprocessor()
     return (preprocessor.fit_transform(X_train, y_train), y_train,
