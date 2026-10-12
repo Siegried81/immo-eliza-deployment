@@ -4,7 +4,7 @@ Deployment phase of the **Immo Eliza Machine Learning** project: a REST API + we
 
 - 🚀 FastAPI backend + 🎨 Streamlit frontend
 - 🤖 XGBoost regression, with a luxury-segment model + routing classifier
-- ✅ Automated pytest suite (86 tests, API and UI, no network, run in CI)
+- ✅ Automated pytest suite (88 tests, API and UI, no network, run in CI)
 - 📊 Prediction logging, PSI-based drift detection
 - 🔎 Audited end to end: [10 bugs found and fixed](#-bugs-found-and-fixed), including one that made the model ignore property type and province and a luxury model that always answered €1.9M
 - 📘 [Technical deep dive](docs/technical_deep_dive.md): how each model, the routing and the price range work, why, and what is still weak
@@ -69,6 +69,7 @@ immo-eliza-deployment/
 │   └── monitor.py             # JSON Lines prediction log, PSI computation
 ├── scripts/
 │   ├── evaluate_stratified.py  # Sweeps the luxury-routing threshold, per tier
+│   ├── evaluate_routing_blend.py # Threshold vs probability blends, per tier (read-only)
 │   ├── export_categories.py    # Writes models/categories.json after each retraining
 │   └── predict_cli.py          # Terminal predictions, same engine and routing as the API
 ├── src/
@@ -114,6 +115,7 @@ immo-eliza-deployment/
 | `src/train.py` | Full training workflow: cleans data, caps outliers, trains standard model, luxury model, routing classifier, and quantile (interval) models; writes `luxury_threshold.json`. Deterministic on a given machine: two runs give identical models (another machine can differ, see `docs/decisions.md`, 2026-10-12). `load_dataset()`, `split()`, `clipped_log_target()` and `price_tiers()` are shared with every script |
 | `src/optimize.py` | Optuna hyperparameter search, scored on exactly the setup `train.py` ships |
 | `scripts/evaluate_stratified.py` | Evaluates the full routing pipeline per price tier across routing thresholds, on the validation split — used to choose the 0.9 threshold |
+| `scripts/evaluate_routing_blend.py` | Read-only comparison of the 0.9 threshold with probability blends of both models, per tier |
 | `scripts/predict_cli.py` | Terminal predictions through the API's schema, engine and routing |
 | `streamlit/app.py` | Web UI: choice lists from `categories.json`, estimate with its likely range, price per m², segment badge, caveats and a history of recent estimates |
 | `tests/` | API, vocabulary mapping, real-model behaviour and UI tests (see [Automated Testing](#-automated-testing)) |
@@ -311,19 +313,20 @@ pip install pytest httpx
 pytest
 ```
 
-Expected: `86 passed`, offline (the UI tests mock the API; prediction logging is disabled).
+Expected: `88 passed`, offline (the UI tests mock the API; prediction logging is disabled).
 
 - `test_app.py`: health check, valid prediction, invalid postcode (422).
 - `test_predict.py`: vocabulary mapping (aliases, idempotence, unknown and rare cities, unknown categories), real-model behaviour (house ≠ apartment, province and condition move the price, the luxury model is not constant), luxury responses without a range, 422 on unknown province, conformal margin reaching its target coverage and applied by the engine.
 - `test_robustness.py`: no fallback routing threshold, no exception text in a 500, `build_year` bounded by today's date, both quantile models built from one configuration that matches the committed ones.
 - `test_monitoring_and_tools.py`: the log appends one line per prediction and loses none under concurrency, carries the features the models read, and feeds a drift report that reads same-population data as stable; the generator never touches the real log; the CLI uses the API's defaults and gives the API's price; a missing range calibration fails instead of a zero margin; the shared split, target and tiers match what training always used; the search scores the shipped setup.
+- `test_routing_blend.py`: the blend measured by `scripts/evaluate_routing_blend.py` is each model at its ends and a log-space mix in between.
 - `test_streamlit_app.py`: the UI sends training-vocabulary values, renders the price and range, updates cities with the province, handles luxury, 422 and unreachable-API cases, and starts the way Streamlit Cloud runs it.
 
 ---
 
 ## 🚧 Future Improvements
 
-- **Calibrate the routing classifier** (or blend both models with its probability) instead of a hard threshold, to reduce the jump between the standard and luxury models.
+- **A softer switch than the hard threshold**, but not the obvious ones: blending both models with the classifier's probability was measured and is worse (`scripts/evaluate_routing_blend.py`, validation split). With the raw probability the €1.9M+ tier improves (34.9% → 23.8% MAPE) but the < €1M tier goes from +6.6% to +19.6% bias (31.3% MAPE); with an isotonic-calibrated probability the €1M–€1.9M tier improves (35.1% → 28.7%) and the €1.9M+ tier gets worse (34.9% → 36.4%). The 0.9 threshold stays.
 - **Persist the prediction log** on Render (a disk behind `PREDICTION_LOG_PATH`), then read the first drift report on real traffic.
 - **Set the clipping and luxury thresholds on the training split only**, at the next retraining (see the deep dive, section 8).
 - **Refresh the data**: one scrape, no re-scrape pipeline.

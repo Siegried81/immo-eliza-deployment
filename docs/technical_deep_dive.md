@@ -133,9 +133,13 @@ What a reader has to know:
   the tier's MAPE by about 3 points; 0.85, 0.9 and 0.95 are within one or two
   properties of each other.
 - **The switch is hard.** A property just under and just over the threshold can
-  get prices €1M apart. Blending the two predictions with the probability, or
-  calibrating the classifier, is the obvious next step (README, "Future
-  Improvements").
+  get prices €1M apart. The obvious fixes were measured and rejected
+  (`scripts/evaluate_routing_blend.py`): a log-space blend weighted by the raw
+  probability helps the €1.9M+ tier (34.9% → 23.8% MAPE) but pushes the
+  < €1M bias from +6.6% to +19.6%, because that probability is inflated by
+  `scale_pos_weight`; weighted by an isotonic-calibrated probability it helps
+  the €1M–€1.9M tier (35.1% → 28.7%) and hurts the €1.9M+ tier (34.9% →
+  36.4%). Neither beats the threshold where the threshold matters.
 
 ---
 
@@ -210,7 +214,7 @@ bias rather than the overall MAPE.
   error in `/predict` is logged with its traceback and answered with a generic
   500, never the exception text. `build_year` is bounded by today's date, not
   by a year written into the schema.
-- **Tests:** 86, offline, run by `.github/workflows/tests.yml` on every push
+- **Tests:** 88, offline, run by `.github/workflows/tests.yml` on every push
   and pull request. They cover the vocabulary mapping, the real model's
   behaviour (house ≠ apartment, province and condition move the price, the
   luxury model is not constant), the conformal margin, the API contract and
