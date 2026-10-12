@@ -5,6 +5,10 @@ from pathlib import Path
 
 import pandas as pd
 
+# Reference year of the training data, not today's date: property_age is
+# CURRENT_YEAR - build_year, and the models learned ages counted from 2026.
+# Moving it with the calendar would age every property by one year each
+# January without a retraining. Update it only together with a retraining.
 CURRENT_YEAR = 2026
 
 VOCABULARY_PATH = Path(__file__).resolve().parent.parent / "models" / "categories.json"
