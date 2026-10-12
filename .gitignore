@@ -22,7 +22,9 @@ ENV/
 .env
 .env.*
 
-.vscode/
+# Personal VS Code settings stay local; the shared Docker debug config is versioned.
+.vscode/*
+!.vscode/launch.json
 .idea/
 
 *.swp
