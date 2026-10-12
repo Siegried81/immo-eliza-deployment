@@ -152,7 +152,7 @@ Tests also wrote every request into `monitoring/logs.json`, polluting the drift 
 docker compose up --build
 ```
 
-App available at `http://localhost:8502`.
+App available at `http://localhost:8508`, API at `http://localhost:8003/docs`.
 
 ### Method 2 — Manual (development)
 
@@ -160,8 +160,8 @@ Python 3.12 recommended (the pinned scikit-learn needs ≥ 3.11).
 
 ```bash
 pip install -r requirements.txt
-uvicorn api.app:app --host 0.0.0.0 --port 8000     # terminal 1
-streamlit run streamlit/app.py                      # terminal 2
+uvicorn api.app:app --host 0.0.0.0 --port 8003                                 # terminal 1
+API_URL=http://localhost:8003 streamlit run streamlit/app.py --server.port 8508 # terminal 2
 ```
 
 ### Method 3 — Retrain & re-evaluate
