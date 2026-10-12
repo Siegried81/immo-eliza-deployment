@@ -12,6 +12,7 @@ Run:
 """
 import os
 import sys
+from datetime import date
 from pathlib import Path
 
 import requests
@@ -179,7 +180,7 @@ with inputs:
                                              "from the livable surface, as during training.")
         bedroom_count = c3.number_input("Bedrooms", min_value=0, max_value=20, value=3)
         c1, c2 = st.columns(2)
-        build_year = c1.number_input("Build year", min_value=1800, max_value=2026, value=1975)
+        build_year = c1.number_input("Build year", min_value=1800, max_value=date.today().year, value=1975)
         energy_known = c2.toggle("I know the energy consumption", value=False,
                                  help="Otherwise a typical value for the property's condition is used.")
         energy = (c2.number_input("Energy consumption (kWh/m²/year)", min_value=1, max_value=1000, value=250)

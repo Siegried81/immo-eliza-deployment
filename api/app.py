@@ -5,11 +5,13 @@ Validates the request, runs the standard, luxury, routing and quantile models
 through api.predict.engine, picks the segment with the routing threshold from
 models/luxury_threshold.json and logs every prediction for drift monitoring.
 """
-import os
-import sys
-import uvicorn
 import json
+import logging
+import sys
+from datetime import date
 from pathlib import Path
+
+import uvicorn
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 from typing import Literal, Optional
@@ -20,14 +22,27 @@ sys.path.append(str(BASE_DIR))
 from monitoring.monitor import log_prediction
 from api.predict import engine
 
-# Load luxury routing config
+logger = logging.getLogger(__name__)
+
 THRESHOLD_PATH = BASE_DIR / "models" / "luxury_threshold.json"
-try:
-    with open(THRESHOLD_PATH, "r") as f:
-        luxury_cfg = json.load(f)
-        LUXURY_THRESHOLD = luxury_cfg.get("routing_probability_threshold", 0.6)
-except FileNotFoundError:
-    LUXURY_THRESHOLD = 0.6
+
+
+def load_routing_threshold(path: Path = THRESHOLD_PATH) -> float:
+    """
+    Routing threshold written by src/train.py next to the models it belongs to.
+
+    No fallback: a guessed value silently changes which model prices a
+    property, so a missing file or key stops the API at start-up instead.
+    """
+    return float(json.loads(Path(path).read_text(encoding="utf-8"))["routing_probability_threshold"])
+
+
+def current_year() -> int:
+    """Upper bound for build_year; a function so tests can move the calendar."""
+    return date.today().year
+
+
+LUXURY_THRESHOLD = load_routing_threshold()
 
 app = FastAPI(title="Immo Eliza API", version="1.0")
 
@@ -49,7 +64,7 @@ class PropertyInput(BaseModel):
     livable_surface: int = Field(..., gt=0)
     total_surface: Optional[int] = Field(None, ge=0, description="Plot surface in m²; 0 or missing means unknown.")
     bedroom_count: int = Field(1, ge=0)
-    build_year: int = Field(2000, ge=1800, le=2026)
+    build_year: int = Field(2000, ge=1800)
     garage: int = Field(0, ge=0, description="Treated as yes/no: any value above 0 means a garage.")
     garden_m2: int = Field(0, ge=0, description="Accepted for backward compatibility; the models do not use it.")
     terrace: int = Field(0, ge=0, description="Treated as yes/no: any value above 0 means a terrace.")
@@ -64,6 +79,14 @@ class PropertyInput(BaseModel):
     def zero_surface_is_unknown(cls, value):
         """No training row has a total surface of 0: it can only mean "not filled in"."""
         return None if value == 0 else value
+
+    @field_validator("build_year")
+    @classmethod
+    def not_in_the_future(cls, value):
+        """Checked against today's date, not a year frozen into the schema."""
+        if value > current_year():
+            raise ValueError(f"build_year cannot be after {current_year()}")
+        return value
 
 @app.get("/")
 def health_check():
@@ -112,8 +135,10 @@ def predict(property_input: PropertyInput):
             "luxury_probability": round(luxury_proba, 3),
             "notes": result["notes"],
         }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        # The traceback goes to the server log; the client gets no internals.
+        logger.exception("Prediction failed")
+        raise HTTPException(status_code=500, detail="Internal error while computing the estimate.")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

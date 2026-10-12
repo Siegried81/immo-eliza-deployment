@@ -4,9 +4,10 @@ Deployment phase of the **Immo Eliza Machine Learning** project: a REST API + we
 
 - 🚀 FastAPI backend + 🎨 Streamlit frontend
 - 🤖 XGBoost regression, with a luxury-segment model + routing classifier
-- ✅ Automated pytest suite (57 tests, API and UI, no network)
+- ✅ Automated pytest suite (65 tests, API and UI, no network, run in CI)
 - 📊 Prediction logging, PSI-based drift detection
 - 🔎 Audited end to end: [10 bugs found and fixed](#-bugs-found-and-fixed), including one that made the model ignore property type and province and a luxury model that always answered €1.9M
+- 📘 [Technical deep dive](docs/technical_deep_dive.md): how each model, the routing and the price range work, why, and what is still weak
 
 ---
 
@@ -49,12 +50,16 @@ flowchart LR
 
 ```text
 immo-eliza-deployment/
+├── .github/workflows/tests.yml  # runs the test suite on every push and PR
 ├── api/
 │   ├── __init__.py
 │   ├── app.py               # FastAPI app, request validation, luxury routing
 │   ├── Dockerfile
 │   └── predict.py            # Loads model artifacts, runs inference
 ├── data/
+├── docs/
+│   ├── decisions.md           # dated record of changes to what a number means
+│   └── technical_deep_dive.md # how it works, why, open issues
 ├── models/                    # pickled pipelines + categories.json (training vocabulary)
 ├── monitoring/
 │   ├── __init__.py
@@ -78,6 +83,7 @@ immo-eliza-deployment/
 │   ├── conftest.py            # disables prediction logging during tests
 │   ├── test_app.py
 │   ├── test_predict.py        # vocabulary mapping + real-model behaviour
+│   ├── test_robustness.py     # failure paths: config, 500s, build year, quantile config
 │   └── test_streamlit_app.py  # UI through Streamlit's AppTest, API mocked
 ├── .streamlit/config.toml     # UI theme
 ├── .dockerignore
@@ -112,6 +118,8 @@ immo-eliza-deployment/
 | `streamlit/app.py` | Web UI: choice lists from `categories.json`, estimate with its likely range, price per m², segment badge, caveats and a history of recent estimates |
 | `tests/` | API, vocabulary mapping, real-model behaviour and UI tests (see [Automated Testing](#-automated-testing)) |
 | `docker-compose.yml` | Orchestrates API + Streamlit containers |
+| `docs/technical_deep_dive.md` | How it works and why: vocabulary contract, training, routing, conformal range, evaluation, open issues by point of view |
+| `docs/decisions.md` | Dated record of every change that altered what a number means |
 
 > **Legacy note:** `pipeline.joblib` now bundles preprocessor + model in one `sklearn.Pipeline`, replacing the old separate `best_XGBoost.json` / `preprocessor.joblib` files.
 
@@ -132,7 +140,7 @@ An end-to-end audit of the deployed service (not just the notebook metrics) foun
 | 7 | `src/train.py` clipped prices at the 99th percentile, then trained the luxury regressor on rows *above* that same percentile. | Every luxury target was €1.9M: **the luxury model answered €1.9M for every property**, so a 400 m² Brussels house jumped from ~€640k (300 m²) to €1.9M. | The luxury regressor is trained on unclipped prices. A test fails if it ever becomes constant again. |
 | 8 | The "true holdout" in `metrics.py` and `evaluate_stratified.py` (rows absent from `training_baseline.csv`) still contained 3,938 of its 4,944 rows from the training split, including 23 of the 29 €3M+ properties. | Metrics were optimistic (16.8% MAPE instead of 22.4%) and rewarded memorisation, so the routing threshold was tuned on training data. | Both scripts score `train.py`'s validation split (3,150 rows no model was fitted on); the threshold was re-chosen there (0.7 → 0.9). |
 | 9 | The committed `pipeline.joblib` could not be reproduced by `src/train.py`. | No way to know how the deployed model was built. | All five artifacts are retrained by `src/train.py` (same validation MAPE: 22.42% → 22.39%) and two runs give identical models. |
-| 10 | The "80%" price range (10th–90th percentile models) held the real price only ~71% of the time on unseen listings. | Users were told the range was more reliable than it is. | Conformalized quantile regression: `train.py` widens both bounds by a margin computed on half of the validation split and measures the result on the other half (70.4% → 77.6%; 79.9% on average over 200 random halvings). |
+| 10 | The "80%" price range (10th–90th percentile models) held the real price only ~71% of the time on unseen listings. | Users were told the range was more reliable than it is. | Conformalized quantile regression: `train.py` widens both bounds by a margin computed on half of the validation split and measures the result on the other half (70.7% → 77.8%, `models/interval_calibration.json`; 79.9% on average over 200 random halvings). |
 
 Tests also wrote every request into `monitoring/logs.json`, polluting the drift report; logging is now disabled in tests.
 
@@ -152,7 +160,7 @@ Tests also wrote every request into `monitoring/logs.json`, polluting the drift 
 docker compose up --build
 ```
 
-App available at `http://localhost:8502`.
+App available at `http://localhost:8508`, API at `http://localhost:8003/docs`.
 
 ### Method 2 — Manual (development)
 
@@ -160,8 +168,8 @@ Python 3.12 recommended (the pinned scikit-learn needs ≥ 3.11).
 
 ```bash
 pip install -r requirements.txt
-uvicorn api.app:app --host 0.0.0.0 --port 8000     # terminal 1
-streamlit run streamlit/app.py                      # terminal 2
+uvicorn api.app:app --host 0.0.0.0 --port 8003                                 # terminal 1
+API_URL=http://localhost:8003 streamlit run streamlit/app.py --server.port 8508 # terminal 2
 ```
 
 ### Method 3 — Retrain & re-evaluate
@@ -257,7 +265,7 @@ Validation split, by tier (`scripts/evaluate_stratified.py`):
 
 This is an **estimation tool, not a valuation system**.
 
-- **Accuracy:** about 22% average error on listings never seen in training (≈ €68k below €1M), with prices overestimated by about 5% on average.
+- **Accuracy:** as deployed (routing at 0.9), about 23% average error on listings never seen in training (22.8%); below €1M it is 22.3% (≈ €70k), with prices overestimated by about 7% (+6.6%). Figures from `scripts/evaluate_stratified.py`; the standard model alone is in [Model Performance](#-model-performance--monitoring).
 - **High-end properties (€1.9M+):** the luxury model learned from ~125 listings; expect errors around a third of the price, typically underestimation. The standard model underprices expensive homes systematically (−46% on this tier without routing); routing halves that bias, it does not remove it.
 - **Routing trade-off:** routing helps the luxury tier but costs accuracy between €1M and €1.9M (see [Luxury Routing](#-luxury-routing)).
 - **Range:** calibrated to hold the real price 8 times in 10 on average; for a given property it can be wide (median width ≈ €210k).
@@ -299,10 +307,11 @@ pip install pytest httpx
 pytest
 ```
 
-Expected: `57 passed`, offline (the UI tests mock the API; prediction logging is disabled).
+Expected: `65 passed`, offline (the UI tests mock the API; prediction logging is disabled).
 
 - `test_app.py`: health check, valid prediction, invalid postcode (422).
 - `test_predict.py`: vocabulary mapping (aliases, idempotence, unknown and rare cities, unknown categories), real-model behaviour (house ≠ apartment, province and condition move the price, the luxury model is not constant), luxury responses without a range, 422 on unknown province, conformal margin reaching its target coverage and applied by the engine.
+- `test_robustness.py`: no fallback routing threshold, no exception text in a 500, `build_year` bounded by today's date, both quantile models built from one configuration that matches the committed ones.
 - `test_streamlit_app.py`: the UI sends training-vocabulary values, renders the price and range, updates cities with the province, handles luxury, 422 and unreachable-API cases, and starts the way Streamlit Cloud runs it.
 
 ---
@@ -326,7 +335,7 @@ XGBoost · scikit-learn · category_encoders · FastAPI · Streamlit · Pydantic
 
 This project turns a trained price model into a working service. An XGBoost model handles most predictions, while a second model and a routing classifier take over for luxury properties, using a threshold picked after testing different price tiers. Each prediction now comes with a range (not just one number), so users can see how uncertain the estimate is.
 
-Along the way, several real bugs were found and fixed: a mismatch between a stored price and a probability that quietly turned off the luxury model, an indexing bug that mixed up rows after splitting the data, and a test set that overlapped too much with the training data, making early results look better than they really were. A later end-to-end audit of the deployed service found more: the API spelled categories differently from the training data (so the model ignored property type and province), the luxury model always answered €1.9M, and the evaluation "holdout" still contained most training rows. With those fixed and every model reproducible from `train.py`, the honest figures are 22.9% average error overall on unseen listings, 22% below €1M and 34% for €1.9M+ properties.
+Along the way, several real bugs were found and fixed: a mismatch between a stored price and a probability that quietly turned off the luxury model, an indexing bug that mixed up rows after splitting the data, and a test set that overlapped too much with the training data, making early results look better than they really were. A later end-to-end audit of the deployed service found more: the API spelled categories differently from the training data (so the model ignored property type and province), the luxury model always answered €1.9M, and the evaluation "holdout" still contained most training rows. With those fixed and every model reproducible from `train.py`, the honest figures, as deployed with routing at 0.9, are 22.8% average error overall on unseen listings, 22.3% below €1M and 34.9% for €1.9M+ properties.
 
 The monitoring tools complete the picture. Drift detection checks whether new data still looks like the training data (right now, 7 out of 12 features show strong drift), and the evaluation script tracks whether the routing decision is still working well over time. This tool does not replace a real estate expert — the app says so clearly — but it gives a solid base to keep the model useful and trustworthy after deployment.
 
