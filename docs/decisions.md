@@ -93,3 +93,24 @@ exactly, but the standard and luxury regressors differ by up to 0.38 and 0.40
 in log price on the validation rows. The README said "two runs give identical
 models" without that condition; it now says "on a given machine". The
 committed models were not replaced: the published figures are theirs.
+
+## 2026-10-12 — the clip bounds and the luxury price come from the training rows
+
+- **What:** `src/train.py::price_bounds()` takes the 1st and 99th percentiles of
+  the TRAINING prices; they set the clip of the standard and quantile models'
+  target and the luxury price (and so the routing labels and the luxury tier).
+  They were taken on all rows, validation included.
+- **Why:** the validation prices helped decide what the models were trained on
+  and how the luxury tier was cut, so the scores were not entirely out of
+  sample. Measured: the 99th percentile moves from €1,900,000 to €1,890,000 and
+  the 1st from €68,500 to €68,475.
+- **What changes in the numbers:** all five models were retrained (in the
+  python:3.12 Linux image, the deploy image) and every README and deep-dive
+  figure re-measured. Standard model: MAPE 22.34% -> 22.52%, bias +4.62% ->
+  +5.06%. As deployed (routing 0.9): 22.8% -> 23.0% overall, 22.3% -> 22.4%
+  below €1M, 34.9% -> 35.8% on the luxury tier, which now holds 36 rows (was
+  35). Retraining the PREVIOUS code in the same image gives 22.64% and 23.2%:
+  the threshold fix itself improves both figures; the rest of the move is the
+  machine (see the 2026-10-12 entry on determinism). The 0.9 routing threshold
+  still holds for the same reason. Range coverage on the check half: 77.9%,
+  80.1% on average over 200 halvings.

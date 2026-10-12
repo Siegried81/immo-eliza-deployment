@@ -55,14 +55,24 @@ def split(frame):
     return train_test_split(frame, test_size=TEST_SIZE, random_state=SPLIT_SEED)
 
 
-def clipped_log_target(prices):
+def price_bounds(train_prices):
     """
-    log1p of the price clipped to its 1st-99th percentile: the target of the
-    standard and quantile models. The clip caps them at the luxury threshold,
-    which is why the luxury path exists. The percentiles are taken on every
-    row passed in, validation included when called on the full data.
+    (1st, 99th) percentile of the TRAINING prices. They set the clip of the
+    target and the luxury price; taken on all rows they would let the
+    validation prices shape what the models are scored against.
     """
-    return np.log1p(prices.clip(prices.quantile(0.01), prices.quantile(0.99)))
+    return float(train_prices.quantile(0.01)), float(train_prices.quantile(0.99))
+
+
+def clipped_log_target(prices, bounds):
+    """
+    log1p of the price clipped to `bounds` (price_bounds of the training rows):
+    the target of the standard and quantile models. The upper bound is the
+    luxury price, so those models cannot predict above it, which is why the
+    luxury path exists.
+    """
+    low, high = bounds
+    return np.log1p(prices.clip(low, high))
 
 
 def price_tiers(luxury_price):
@@ -133,9 +143,9 @@ def train():
     """
     df = load_dataset()
     X = df.drop(columns=[TARGET])
-    y = clipped_log_target(df[TARGET])
-
     X_train, X_val = split(X)
+    bounds = price_bounds(df.loc[X_train.index, TARGET])
+    y = clipped_log_target(df[TARGET], bounds)
     y_train, y_val = y.loc[X_train.index], y.loc[X_val.index]
     preprocessor = build_preprocessor()
     X_train_p = preprocessor.fit_transform(X_train, y_train)
@@ -168,7 +178,7 @@ def train():
     joblib.dump(Pipeline([("preprocessor", preprocessor), ("model", upper_model)]), PIPELINE_UPPER_PATH)
 
     # Luxury Routing Classifier 
-    luxury_price_threshold = df[TARGET].quantile(0.99)
+    luxury_price_threshold = bounds[1]
     y_lux = (df[TARGET] > luxury_price_threshold).astype(int)
 
     pos_weight = (y_lux == 0).sum() / max((y_lux == 1).sum(), 1)
