@@ -50,7 +50,9 @@ flowchart LR
 
 ```text
 immo-eliza-deployment/
-├── .github/workflows/tests.yml  # runs the test suite on every push and PR
+├── .github/workflows/
+│   ├── tests.yml            # runs the test suite on every push and PR
+│   └── publish.yml          # builds and publishes the API and UI images
 ├── api/
 │   ├── __init__.py
 │   ├── app.py               # FastAPI app, request validation, luxury routing
@@ -83,15 +85,19 @@ immo-eliza-deployment/
 ├── tests/
 │   ├── conftest.py            # disables prediction logging during tests
 │   ├── test_app.py
+│   ├── test_monitoring_and_tools.py # prediction log, drift report, CLI, shared split
 │   ├── test_predict.py        # vocabulary mapping + real-model behaviour
 │   ├── test_robustness.py     # failure paths: config, 500s, build year, quantile config
+│   ├── test_routing_blend.py  # the blend measured by evaluate_routing_blend.py
 │   └── test_streamlit_app.py  # UI through Streamlit's AppTest, API mocked
 ├── .streamlit/config.toml     # UI theme
 ├── .dockerignore
 ├── .gitignore
 ├── docker-compose.yml
+├── docker-compose.debug.yml   # same stack under debugpy, for VS Code
 ├── README.md
-└── requirements.txt
+├── requirements.txt
+└── requirements-dev.txt       # debugpy, never in the published images
 ```
 
 > `scripts/evaluate_stratified.py` reports metrics **per price tier** and sweeps the luxury-routing threshold — replaces the old global-metric `evaluate.py`.
@@ -141,7 +147,7 @@ An end-to-end audit of the deployed service (not just the notebook metrics) foun
 | 6 | The price range comes from the standard-segment quantile models but was returned next to luxury-model prices. | A range describing a different estimate. | The range is only returned for the standard segment. |
 | 7 | `src/train.py` clipped prices at the 99th percentile, then trained the luxury regressor on rows *above* that same percentile. | Every luxury target was €1.9M: **the luxury model answered €1.9M for every property**, so a 400 m² Brussels house jumped from ~€640k (300 m²) to €1.9M. | The luxury regressor is trained on unclipped prices. A test fails if it ever becomes constant again. |
 | 8 | The "true holdout" in `metrics.py` and `evaluate_stratified.py` (rows absent from `training_baseline.csv`) still contained 3,938 of its 4,944 rows from the training split, including 23 of the 29 €3M+ properties. | Metrics were optimistic (16.8% MAPE instead of 22.4%) and rewarded memorisation, so the routing threshold was tuned on training data. | Both scripts score `train.py`'s validation split (3,150 rows no model was fitted on); the threshold was re-chosen there (0.7 → 0.9). |
-| 9 | The committed `pipeline.joblib` could not be reproduced by `src/train.py`. | No way to know how the deployed model was built. | All five artifacts are retrained by `src/train.py` (same validation MAPE: 22.42% → 22.39%) and two runs give identical models. |
+| 9 | The committed `pipeline.joblib` could not be reproduced by `src/train.py`. | No way to know how the deployed model was built. | All five artifacts are retrained by `src/train.py` (same validation MAPE: 22.42% → 22.39%) and two runs on the same machine give identical models. |
 | 10 | The "80%" price range (10th–90th percentile models) held the real price only ~71% of the time on unseen listings. | Users were told the range was more reliable than it is. | Conformalized quantile regression: `train.py` widens both bounds by a margin computed on half of the validation split and measures the result on the other half (70.7% → 77.9%, `models/interval_calibration.json`; 80.1% on average over 200 random halvings). |
 
 Tests also wrote every request into `monitoring/logs.json`, polluting the drift report; logging is now disabled in tests.
@@ -189,7 +195,7 @@ python monitoring/metrics.py            # standard-model metrics by tier on the 
 
 - **Docker** auto-restarts either container on crash.
 - **`/ping`** endpoint: lightweight liveness check.
-- **UptimeRobot** polls `/ping` to prevent cold starts on free-tier hosting (see `tests/UptimeRobot.png`).
+- **UptimeRobot** polls `/ping` to prevent cold starts on free-tier hosting (see `tests/uptimeRobot.png`).
 
 ---
 
@@ -223,7 +229,7 @@ Estimated price: **€1,449,607**
 
 ## 📊 Model Performance & Monitoring
 
-All figures are measured on `train.py`'s **validation split**: 3,150 listings no model was fitted on (the standard model uses it for early stopping only). Earlier versions of this README reported 16.83% MAPE on a "holdout" that turned out to contain 80% training rows (bug #8); the numbers below are the real ones.
+All figures are measured on `train.py`'s **validation split**: 3,150 listings no model was fitted on (the standard and quantile models use it for early stopping only). Earlier versions of this README reported 16.83% MAPE on a "holdout" that turned out to contain 80% training rows (bug #8); the numbers below are the real ones.
 
 **Standard model alone** (`monitoring/metrics.py`):
 

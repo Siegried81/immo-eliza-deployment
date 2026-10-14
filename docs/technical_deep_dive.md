@@ -6,7 +6,8 @@ is for the person who has to change it.
 
 Every figure below was measured by the scripts named next to it and is quoted
 from the README or from `models/interval_calibration.json`. None was
-re-measured for this document: re-running `src/train.py` is deterministic, but
+re-measured for this document: re-running `src/train.py` is deterministic on a
+given machine, but
 it is the only way the figures can move, and it is a separate decision.
 
 ---
@@ -29,7 +30,7 @@ Streamlit UI ──POST /predict──▶ FastAPI (api/app.py)
                        api/app.py :: routing (p ≥ 0.9 → luxury)
                                   │  range only for the standard segment
                                   ▼
-                       JSON response  +  monitoring/logs.json
+                       JSON response  +  monitoring/logs.jsonl
 ```
 
 The five models are `sklearn.Pipeline`s that share one fitted preprocessor
@@ -96,22 +97,24 @@ surface or distances, which moved a typical Liège house by about +14%
   Immovlan. It is git-ignored, so a fresh clone cannot retrain.
 - **Split:** 80/20, `SPLIT_SEED = 42`, `TEST_SIZE = 0.2`. The evaluation scripts
   import these constants, so they score the same 3,150 validation rows that no
-  model was fitted on. The standard model does use them for early stopping.
+  model was fitted on. The standard and quantile models do use them for early
+  stopping.
 - **Target:** `log1p(price)`, clipped to the 1st–99th percentile for the
   standard and quantile models, the percentiles taken on the training rows
   only (`price_bounds`). The clip caps the standard model at €1.89M,
   which is why the luxury path exists.
 - **Standard regressor:** XGBoost, `reg:absoluteerror`, hyperparameters from an
   Optuna search (`src/optimize.py`) hard-coded into `train.py`.
-- **Luxury classifier:** XGBoost with `scale_pos_weight ≈ 99` (ratio of
+- **Luxury classifier:** XGBoost with `scale_pos_weight ≈ 97` (ratio of
   non-luxury to luxury rows). That weight inflates the probabilities, which is
   why the routing threshold sits as high as 0.9 (section 4).
 - **Luxury regressor:** trained on the 125 luxury rows of the training split,
   on **unclipped** prices. Training it on the clipped target made every luxury
   target €1.9M and the model a constant (README, bug #7); a test now fails if
   it becomes constant again.
-- **Deterministic:** two runs give identical models, and the committed models
-  are the ones `train.py` produces (README, bug #9).
+- **Deterministic on one machine:** two runs give identical models, and the
+  committed models are the ones `train.py` produces in the python:3.12 Linux
+  image (README, bug #9; section 8).
 
 ---
 
@@ -130,7 +133,7 @@ What a reader has to know:
 - **Routing is kept for the top tier, not for the average.** It costs 0.5 point
   of overall MAPE and 8 points on the €1M–€1.89M tier, and it cuts the luxury
   bias from −45% to −29%.
-- **0.9 is kept, not proven best.** With 35 luxury rows, one property moves
+- **0.9 is kept, not proven best.** With 36 luxury rows, one property moves
   the tier's MAPE by about 3 points; 0.85, 0.9 and 0.95 are within one or two
   properties of each other.
 - **The switch is hard.** A property just under and just over the threshold can
