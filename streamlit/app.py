@@ -24,7 +24,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.features import LOW_SAMPLE_CITY, STATE_MAPPING, load_vocabulary  # noqa: E402
 
 API_URL = os.getenv("API_URL", "http://localhost:8000").strip().rstrip("/")
-API_DOCS_URL = f"{API_URL}/docs"
+# Set to an empty string where the API is private to the UI (the Hugging Face
+# Space): a link to a localhost URL would open on the visitor's own machine.
+API_DOCS_URL = os.getenv("API_DOCS_URL", f"{API_URL}/docs").strip()
 # Render's free tier sleeps after inactivity; waking it takes up to about a minute.
 PREDICT_TIMEOUT_S = 90
 HISTORY_SIZE = 5
@@ -141,7 +143,8 @@ with st.sidebar:
         st.success("API online", icon="🟢")
     else:
         st.warning("API asleep or unreachable. The first estimate may take up to a minute.", icon="🟠")
-    st.markdown(f"[API documentation]({API_DOCS_URL})")
+    if API_DOCS_URL:
+        st.markdown(f"[API documentation]({API_DOCS_URL})")
     st.divider()
     st.caption("How it works: a routing classifier sends likely luxury properties (≈ €1.9M+) to a "
                "dedicated model; two quantile models (10th and 90th percentile) give the range for the others.")

@@ -2,3 +2,5 @@
 # debugpy: VS Code debugger, used by docker-compose.debug.yml (and locally:
 #   pip install -r requirements-dev.txt)
 debugpy>=1.8,<2
+# huggingface_hub: scripts/publish_hf.py (Space and model repo uploads)
+huggingface_hub>=1.0,<2

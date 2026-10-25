@@ -20,8 +20,11 @@ and credited in the fix unless you prefer otherwise.
 
 ## Secrets
 
-Every key and token is read from a local `.env` that git ignores; `.env.example`
-lists the names with empty values. A credential that appears in this
+The API and the UI use no key or token. The only credential the project touches
+is the Hugging Face write token that `scripts/publish_hf.py` needs; it is the one
+`hf auth login` stores in the user's Hugging Face cache, outside the repository,
+and the script never reads or prints it. `.env` files stay gitignored;
+`.env.example` lists the variables with their defaults and no value. A credential that appears in this
 repository's history is a vulnerability in its own right: report it the same
 way, and it will be revoked rather than merely deleted.
 
