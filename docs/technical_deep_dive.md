@@ -207,7 +207,14 @@ bias rather than the overall MAPE.
   minute to wake.
 - **Hosting:** API on Render, UI on Streamlit Community Cloud, both reading
   `$PORT`. Locally, `docker-compose.yml` runs both, the UI reaching the API by
-  its service name (`API_URL=http://api:8000`).
+  its service name (`API_URL=http://api:8000`). The Hugging Face Space
+  (`hf/space/`) runs both in one container instead, because a Space exposes a
+  single port: the API listens on localhost, the UI on 7860, and `start.sh`
+  waits for `/ping` before starting the UI so its cached health check does not
+  record the API as asleep while the models load. `API_DOCS_URL=""` hides the
+  docs link there, since the API is not reachable from outside. That Space is
+  built and run locally with Docker but not published: Hugging Face hosts
+  Docker Spaces for PRO accounts only.
 - **Pinned libraries:** the models are pickles, so `scikit-learn`, `xgboost` and
   `category_encoders` are pinned to the versions they were pickled with. A
   newer `category_encoders` makes every prediction fail (README, bug #3). Any

@@ -109,6 +109,20 @@ def test_unreachable_api_shows_connection_error(api, monkeypatch):
     assert "Cannot reach the API" in at.error[0].value
 
 
+def test_docs_link_follows_the_api_url(api, monkeypatch):
+    monkeypatch.setenv("API_URL", "https://api.example.org/")
+    monkeypatch.delenv("API_DOCS_URL", raising=False)
+    at = run_app()
+    assert "[API documentation](https://api.example.org/docs)" in [m.value for m in at.markdown]
+
+
+def test_empty_docs_url_hides_the_link(api, monkeypatch):
+    """The Space sets API_DOCS_URL to "": its API only listens on localhost."""
+    monkeypatch.setenv("API_DOCS_URL", "")
+    at = run_app()
+    assert not any("API documentation" in m.value for m in at.markdown)
+
+
 def test_app_starts_without_repo_root_on_path(tmp_path):
     """`streamlit run streamlit/app.py` only puts streamlit/ on sys.path, so the
     app must find src/ by itself. Run in a fresh interpreter outside the repo."""
