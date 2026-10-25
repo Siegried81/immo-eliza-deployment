@@ -4,7 +4,7 @@ Deployment phase of the **Immo Eliza Machine Learning** project: a REST API + we
 
 - 🚀 FastAPI backend + 🎨 Streamlit frontend
 - 🤖 XGBoost regression, with a luxury-segment model + routing classifier
-- ✅ Automated pytest suite (89 tests, API and UI, no network, run in CI)
+- ✅ Automated pytest suite (99 tests, API and UI, no network, run in CI)
 - 📊 Prediction logging, PSI-based drift detection
 - 🔎 Audited end to end: [10 bugs found and fixed](#-bugs-found-and-fixed), including one that made the model ignore property type and province and a luxury model that always answered €1.9M
 - 📘 [Technical deep dive](docs/technical_deep_dive.md): how each model, the routing and the price range work, why, and what is still weak
@@ -62,6 +62,9 @@ immo-eliza-deployment/
 ├── docs/
 │   ├── decisions.md           # dated record of changes to what a number means
 │   └── technical_deep_dive.md # how it works, why, open issues
+├── hf/
+│   ├── model_card.md          # README of the Hugging Face model repo
+│   └── space/                 # Dockerfile, start.sh and README of the Hugging Face Space
 ├── models/                    # pickled pipelines + categories.json (training vocabulary)
 ├── monitoring/
 │   ├── __init__.py
@@ -73,7 +76,8 @@ immo-eliza-deployment/
 │   ├── evaluate_stratified.py  # Sweeps the luxury-routing threshold, per tier
 │   ├── evaluate_routing_blend.py # Threshold vs probability blends, per tier (read-only)
 │   ├── export_categories.py    # Writes models/categories.json after each retraining
-│   └── predict_cli.py          # Terminal predictions, same engine and routing as the API
+│   ├── predict_cli.py          # Terminal predictions, same engine and routing as the API
+│   └── publish_hf.py           # Publishes the Space or the model repo to Hugging Face
 ├── src/
 │   ├── __init__.py
 │   ├── features.py            # Single source of truth for feature engineering
@@ -87,17 +91,20 @@ immo-eliza-deployment/
 │   ├── test_app.py
 │   ├── test_monitoring_and_tools.py # prediction log, drift report, CLI, shared split
 │   ├── test_predict.py        # vocabulary mapping + real-model behaviour
+│   ├── test_publish_hf.py     # what each Hugging Face repo receives, Hub mocked
 │   ├── test_robustness.py     # failure paths: config, 500s, build year, quantile config
 │   ├── test_routing_blend.py  # the blend measured by evaluate_routing_blend.py
 │   └── test_streamlit_app.py  # UI through Streamlit's AppTest, API mocked
 ├── .streamlit/config.toml     # UI theme
 ├── .dockerignore
+├── .env.example               # every environment variable, with its default
+├── .gitattributes             # keeps shell scripts LF for the Linux containers
 ├── .gitignore
 ├── docker-compose.yml
 ├── docker-compose.debug.yml   # same stack under debugpy, for VS Code
 ├── README.md
 ├── requirements.txt
-└── requirements-dev.txt       # debugpy, never in the published images
+└── requirements-dev.txt       # debugpy, huggingface_hub; never in the published images
 ```
 
 > `scripts/evaluate_stratified.py` reports metrics **per price tier** and sweeps the luxury-routing threshold — replaces the old global-metric `evaluate.py`.
@@ -123,6 +130,9 @@ immo-eliza-deployment/
 | `scripts/evaluate_stratified.py` | Evaluates the full routing pipeline per price tier across routing thresholds, on the validation split — used to choose the 0.9 threshold |
 | `scripts/evaluate_routing_blend.py` | Read-only comparison of the 0.9 threshold with probability blends of both models, per tier |
 | `scripts/predict_cli.py` | Terminal predictions through the API's schema, engine and routing |
+| `scripts/publish_hf.py` | Publishes the app as a Hugging Face Space or the models as a Hub model repo; only git-tracked files plus `hf/`, dry run unless `--push` |
+| `hf/space/` | The Space's `Dockerfile`, `start.sh` (API on localhost, then the UI on port 7860) and `README.md` (Space settings) |
+| `hf/model_card.md` | The model repo's card: files, usage, evaluation and limitations |
 | `streamlit/app.py` | Web UI: choice lists from `categories.json`, estimate with its likely range, price per m², segment badge, caveats and a history of recent estimates |
 | `tests/` | API, vocabulary mapping, real-model behaviour and UI tests (see [Automated Testing](#-automated-testing)) |
 | `docker-compose.yml` | Orchestrates API + Streamlit containers |
@@ -159,8 +169,23 @@ Tests also wrote every request into `monitoring/logs.json`, polluting the drift 
 ### 🌐 Live Deployment
 
 - **Web App (Streamlit Community Cloud):** https://immo-eliza-deployment-sieg.streamlit.app
-- **API (Render):** https://immo-eliza-ui.onrender.com
-- **API Docs (Swagger UI):** https://immo-eliza-ui.onrender.com/docs
+- **API (Render):** https://immo-eliza-ui.onrender.com — offline on 2026-10-25: Render
+  answered every path with 404 and `x-render-routing: no-server` (no service behind
+  the name), so the web app shows "The API returned an error (404)" until the
+  service is recreated from `api/Dockerfile`.
+- **Models (Hugging Face Hub):** https://huggingface.co/Siegried81/immo-eliza-price-models
+
+To republish the models after retraining (needs `hf auth login` with a write token):
+
+```bash
+python scripts/publish_hf.py model           # dry run: lists what would be uploaded
+python scripts/publish_hf.py model --push    # the model artifacts and their card
+```
+
+`hf/space/` holds a Hugging Face Space that runs the API and the UI in one
+container (`python scripts/publish_hf.py space --push`). It is built and tested
+locally but not published: Hugging Face only hosts Docker Spaces for PRO
+accounts (the Hub answered 402 to the creation request on 2026-10-25).
 
 ### Method 1 — Docker Compose (recommended)
 
@@ -315,18 +340,19 @@ What the tooling gives on 2,000 validation listings the models never trained on 
 ## 🧪 Automated Testing
 
 ```bash
-pip install pytest httpx
+pip install pytest httpx huggingface_hub
 pytest
 ```
 
-Expected: `89 passed`, offline (the UI tests mock the API; prediction logging is disabled).
+Expected: `99 passed`, offline (the UI tests mock the API; prediction logging is disabled).
 
 - `test_app.py`: health check, valid prediction, invalid postcode (422).
 - `test_predict.py`: vocabulary mapping (aliases, idempotence, unknown and rare cities, unknown categories), real-model behaviour (house ≠ apartment, province and condition move the price, the luxury model is not constant), luxury responses without a range, 422 on unknown province, conformal margin reaching its target coverage and applied by the engine.
 - `test_robustness.py`: no fallback routing threshold, no exception text in a 500, `build_year` bounded by today's date, both quantile models built from one configuration that matches the committed ones.
 - `test_monitoring_and_tools.py`: the log appends one line per prediction and loses none under concurrency, carries the features the models read, and feeds a drift report that reads same-population data as stable; the generator never touches the real log; the CLI uses the API's defaults and gives the API's price; a missing range calibration fails instead of a zero margin; the shared split, target and tiers match what training always used; the search scores the shipped setup.
 - `test_routing_blend.py`: the blend measured by `scripts/evaluate_routing_blend.py` is each model at its ends and a log-space mix in between.
-- `test_streamlit_app.py`: the UI sends training-vocabulary values, renders the price and range, updates cities with the province, handles luxury, 422 and unreachable-API cases, and starts the way Streamlit Cloud runs it.
+- `test_streamlit_app.py`: the UI sends training-vocabulary values, renders the price and range, updates cities with the province, handles luxury, 422 and unreachable-API cases, hides the API docs link where the API is private, and starts the way Streamlit Cloud runs it.
+- `test_publish_hf.py`: each Hugging Face repo receives the runtime files and nothing untracked, the Space card matches the port the container serves, `start.sh` keeps Unix line endings, and a dry run uploads nothing.
 
 ---
 

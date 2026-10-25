@@ -33,12 +33,15 @@ docker run -d --network immo -p 8508:10000 -e API_URL=http://api:8000 siegried/i
 
 ## Environment variables
 
-None are required to start the UI. Secrets are **never** baked into the image: pass
-them at run time with `-e NAME=value` or `--env-file .env` (see `.env.example` in the repo).
+None are required, and neither image needs a secret. Pass them at run time with
+`-e NAME=value` or `--env-file .env` (`.env.example` in the repo lists them with
+their defaults).
 
 | Variable | Purpose |
 |---|---|
 | `API_URL` | UI only: where the API answers (default `http://localhost:8000`) |
+| `API_DOCS_URL` | UI only: the "API documentation" link (default `$API_URL/docs`; empty hides it) |
+| `PREDICTION_LOG_PATH` | API only: where the prediction log is appended (default `monitoring/logs.jsonl`) |
 | `PORT` | listening port, set automatically on Render |
 
 ## Volumes

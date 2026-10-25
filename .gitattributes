@@ -1,0 +1,2 @@
+# Shell scripts run in Linux containers: a CRLF checkout on Windows breaks them.
+*.sh text eol=lf

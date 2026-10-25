@@ -21,6 +21,8 @@ ENV/
 
 .env
 .env.*
+# The template holds names and defaults only, never a value.
+!.env.example
 
 # Personal VS Code settings stay local; the shared Docker debug config is versioned.
 .vscode/*
