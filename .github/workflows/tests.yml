@@ -22,6 +22,7 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install --only-binary=:all: -r requirements.txt pytest httpx
+          # huggingface_hub: scripts/publish_hf.py builds its commit with it (Hub mocked in tests).
+          pip install --only-binary=:all: -r requirements.txt pytest httpx huggingface_hub
       - name: Test
         run: python -m pytest -q
