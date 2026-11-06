@@ -15,9 +15,14 @@ updates:
     # ranges (`>=1.8,<2`), so Dependabot has no current version to compare against and
     # cannot tell a major from a patch. A group filtered on update-types then
     # matches nothing and every bump falls back to a PR of its own.
-    # Note: scikit-learn, xgboost and category_encoders are pinned to the
-    # versions the pickled models in models/ were trained with. A bump of one
-    # of them needs a retrain, not just a merge.
+    # scikit-learn, xgboost and category_encoders are pinned to the versions
+    # the pickled models in models/ were trained with, and a newer one can fail
+    # to load them (category_encoders 2.11 did). They move only with a retrain,
+    # so Dependabot leaves them alone.
+    ignore:
+      - dependency-name: "scikit-learn"
+      - dependency-name: "xgboost"
+      - dependency-name: "category_encoders"
     groups:
       python-deps:
         patterns: ["*"]
