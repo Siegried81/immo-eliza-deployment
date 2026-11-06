@@ -1,0 +1,50 @@
+# Dependency version updates, weekly. Each ecosystem gets one grouped PR, so a
+# week of bumps arrives as a handful of PRs instead of one per package. While a
+# group PR is open, Dependabot rebases it with newer releases instead of opening
+# another one. Security updates arrive as soon as an advisory is published,
+# whatever the schedule.
+version: 2
+updates:
+  # requirements.txt and requirements-dev.txt both sit at the root; the two
+  # Dockerfiles install the root requirements.txt, so one entry covers them all.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    # One group with no update-types filter. Most requirements are unpinned or
+    # ranges (`>=1.8,<2`), so Dependabot has no current version to compare against and
+    # cannot tell a major from a patch. A group filtered on update-types then
+    # matches nothing and every bump falls back to a PR of its own.
+    # Note: scikit-learn, xgboost and category_encoders are pinned to the
+    # versions the pickled models in models/ were trained with. A bump of one
+    # of them needs a retrain, not just a merge.
+    groups:
+      python-deps:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directories:
+      - /api
+      - /streamlit
+    schedule:
+      interval: weekly
+    groups:
+      docker-images:
+        patterns: ["*"]
+    # Both bases stay on python:3.12-slim. The pinned requirements do resolve to
+    # wheels on 3.13 and 3.14, but scikit-learn 1.9.0 has no 3.15 wheel, so the
+    # newest tag Dependabot would offer breaks the build (`--only-binary=:all:`).
+    # tests.yml also runs on 3.12 and no PR check builds the image, so a base
+    # bump would merge untested. Move the base, tests.yml and the Dockerfile
+    # comment together by hand, then narrow or drop this ignore.
+    ignore:
+      - dependency-name: python
+        versions: [">=3.13"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
