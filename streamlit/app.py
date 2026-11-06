@@ -27,8 +27,9 @@ API_URL = os.getenv("API_URL", "http://localhost:8000").strip().rstrip("/")
 # Set to an empty string where the API is private to the UI (the Hugging Face
 # Space): a link to a localhost URL would open on the visitor's own machine.
 API_DOCS_URL = os.getenv("API_DOCS_URL", f"{API_URL}/docs").strip()
-# Render's free tier sleeps after inactivity; waking it takes up to about a minute.
-PREDICT_TIMEOUT_S = 90
+# Render's free tier sleeps after inactivity. A cold wake measured 83 s, so 90 s
+# left almost no margin.
+PREDICT_TIMEOUT_S = 120
 HISTORY_SIZE = 5
 
 VOCABULARY = load_vocabulary()
@@ -142,7 +143,7 @@ with st.sidebar:
     if api_is_awake():
         st.success("API online", icon="🟢")
     else:
-        st.warning("API asleep or unreachable. The first estimate may take up to a minute.", icon="🟠")
+        st.warning("API asleep or unreachable. The first estimate may take up to 90 seconds.", icon="🟠")
     if API_DOCS_URL:
         st.markdown(f"[API documentation]({API_DOCS_URL})")
     st.divider()
