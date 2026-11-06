@@ -169,10 +169,10 @@ Tests also wrote every request into `monitoring/logs.json`, polluting the drift 
 ### 🌐 Live Deployment
 
 - **Web App (Streamlit Community Cloud):** https://immo-eliza-deployment-sieg.streamlit.app
-- **API (Render):** https://immo-eliza-ui.onrender.com — offline on 2026-10-25: Render
-  answered every path with 404 and `x-render-routing: no-server` (no service behind
-  the name), so the web app shows "The API returned an error (404)" until the
-  service is recreated from `api/Dockerfile`.
+- **API (Render):** https://immo-eliza-deployment-j8av.onrender.com (docs at `/docs`).
+  It runs as a Render Python service, not from the Dockerfile:
+  `uvicorn api.app:app --host 0.0.0.0 --port $PORT`. On the free tier it sleeps when
+  idle, and the first request after that took 83 s on 2026-11-06.
 - **Models (Hugging Face Hub):** https://huggingface.co/Siegried81/immo-eliza-price-models
 
 To republish the models after retraining (needs `hf auth login` with a write token):
@@ -354,7 +354,7 @@ pip install pytest httpx huggingface_hub
 pytest
 ```
 
-Expected: `99 passed`, offline (the UI tests mock the API; prediction logging is disabled).
+Expected: `98 passed, 1 skipped`, offline (the skip is the drift-report generator test, which needs `data/`) (the UI tests mock the API; prediction logging is disabled).
 
 - `test_app.py`: health check, valid prediction, invalid postcode (422).
 - `test_predict.py`: vocabulary mapping (aliases, idempotence, unknown and rare cities, unknown categories), real-model behaviour (house ≠ apartment, province and condition move the price, the luxury model is not constant), luxury responses without a range, 422 on unknown province, conformal margin reaching its target coverage and applied by the engine.
