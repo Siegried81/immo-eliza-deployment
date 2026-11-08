@@ -4,9 +4,9 @@ Deployment phase of the **Immo Eliza Machine Learning** project: a REST API + we
 
 - 🚀 FastAPI backend + 🎨 Streamlit frontend
 - 🤖 XGBoost regression, with a luxury-segment model + routing classifier
-- ✅ Automated pytest suite (99 tests, API and UI, no network, run in CI)
+- ✅ Automated pytest suite (103 tests, API and UI, no network, run in CI)
 - 📊 Prediction logging, PSI-based drift detection
-- 🔎 Audited end to end: [10 bugs found and fixed](#-bugs-found-and-fixed), including one that made the model ignore property type and province and a luxury model that always answered €1.9M
+- 🔎 Audited end to end: [12 bugs found and fixed](#-bugs-found-and-fixed), including one that made the model ignore property type and province and a luxury model that always answered €1.9M
 - 📘 [Technical deep dive](docs/technical_deep_dive.md): how each model, the routing and the price range work, why, and what is still weak
 
 ---
@@ -159,6 +159,8 @@ An end-to-end audit of the deployed service (not just the notebook metrics) foun
 | 8 | The "true holdout" in `metrics.py` and `evaluate_stratified.py` (rows absent from `training_baseline.csv`) still contained 3,938 of its 4,944 rows from the training split, including 23 of the 29 €3M+ properties. | Metrics were optimistic (16.8% MAPE instead of 22.4%) and rewarded memorisation, so the routing threshold was tuned on training data. | Both scripts score `train.py`'s validation split (3,150 rows no model was fitted on); the threshold was re-chosen there (0.7 → 0.9). |
 | 9 | The committed `pipeline.joblib` could not be reproduced by `src/train.py`. | No way to know how the deployed model was built. | All five artifacts are retrained by `src/train.py` (same validation MAPE: 22.42% → 22.39%) and two runs on the same machine give identical models. |
 | 10 | The "80%" price range (10th–90th percentile models) held the real price only ~71% of the time on unseen listings. | Users were told the range was more reliable than it is. | Conformalized quantile regression: `train.py` widens both bounds by a margin computed on half of the validation split and measures the result on the other half (70.7% → 77.9%, `models/interval_calibration.json`; 80.1% on average over 200 random halvings). |
+| 11 | The API defaulted a left-out `bedroom_count` to 1, while a training row without one was imputed with the median (3). | An API or CLI request without a bedroom count was priced as a one-bedroom: **-15.6%** on a 150 m² Liège house (€251,749 → €212,429), -7.0% on an 85 m² Elsene apartment. The UI always sends the field, so it was not affected. | `bedroom_count` defaults to *missing*, like the other optional fields, and goes to the pipeline's median imputer. |
+| 12 | `add_features()` filled a column the caller did not give with 0 (the three distances) or 1 (bedrooms). Training rows always have those columns, so only a direct `engine.predict()` call reached these defaults, such as the example in the Hugging Face model card. | The same 90 m² Ixelles apartment (built in 2000) got **€300,692 from the engine and €363,063 from the API** (-17.2%): the engine read distances of 0 m and one bedroom. | The defaults are *missing*, so the median imputer fills them as in training and the engine agrees with the API. |
 
 Tests also wrote every request into `monitoring/logs.json`, polluting the drift report; logging is now disabled in tests.
 
@@ -312,6 +314,7 @@ This is an **estimation tool, not a valuation system**.
 - **High-end properties (€1.89M+):** the luxury model learned from 125 listings; expect errors around a third of the price, typically underestimation. The standard model underprices expensive homes systematically (−45% on this tier without routing); routing reduces that bias to −29%, it does not remove it.
 - **Routing trade-off:** routing helps the luxury tier but costs accuracy between €1M and €1.89M (see [Luxury Routing](#-luxury-routing)).
 - **Range:** calibrated to hold the real price 8 times in 10 on average; for a given property it can be wide (median width ≈ €213k).
+- **Build year left out:** the API assumes 2000, while training filled a missing year with the current year (a new build). On a 150 m² Liège house that is €251,749 against €209,990. Picking one rule means retraining and re-measuring every figure above, and the raw data is not in this repo, so it is left as is and documented in `docs/decisions.md`. Send the year when you know it.
 - **City names:** the training data keeps one spelling per municipality (e.g. *Elsene*, not *Ixelles*). `CITY_ALIASES` in `src/features.py` maps 80 French, Dutch and English names to that spelling; a name outside both lists is accepted but ignored, and the API says so in `notes`.
 
 These limitations are documented here and surfaced in the Streamlit app as a disclaimer next to each prediction, plus a flag when routed to the luxury model.
@@ -354,11 +357,11 @@ pip install pytest httpx huggingface_hub
 pytest
 ```
 
-Expected: `99 passed`, offline (the UI tests mock the API; prediction logging is disabled).
+Expected: `102 passed, 1 skipped`, offline (the UI tests mock the API; prediction logging is disabled). The skipped test runs the synthetic log generator and needs `data/`, which is not in git.
 
 - `test_app.py`: health check, valid prediction, invalid postcode (422).
-- `test_predict.py`: vocabulary mapping (aliases, idempotence, unknown and rare cities, unknown categories), real-model behaviour (house ≠ apartment, province and condition move the price, the luxury model is not constant), luxury responses without a range, 422 on unknown province, conformal margin reaching its target coverage and applied by the engine.
-- `test_robustness.py`: no fallback routing threshold, no exception text in a 500, `build_year` bounded by today's date, both quantile models built from one configuration that matches the committed ones.
+- `test_predict.py`: vocabulary mapping (aliases, idempotence, unknown and rare cities, unknown categories), real-model behaviour (house ≠ apartment, province and condition move the price, the luxury model is not constant), luxury responses without a range, 422 on unknown province, conformal margin reaching its target coverage and applied by the engine, the engine called with the required fields alone pricing like the API.
+- `test_robustness.py`: no fallback routing threshold, no exception text in a 500, `build_year` bounded by today's date, a left-out bedroom count priced at the training median, both quantile models built from one configuration that matches the committed ones.
 - `test_monitoring_and_tools.py`: the log appends one line per prediction and loses none under concurrency, carries the features the models read, and feeds a drift report that reads same-population data as stable; the generator never touches the real log; the CLI uses the API's defaults and gives the API's price; a missing range calibration fails instead of a zero margin; the shared split, target and tiers match what training always used; the search scores the shipped setup.
 - `test_routing_blend.py`: the blend measured by `scripts/evaluate_routing_blend.py` is each model at its ends and a log-space mix in between.
 - `test_streamlit_app.py`: the UI sends training-vocabulary values, renders the price and range, updates cities with the province, handles luxury, 422 and unreachable-API cases, hides the API docs link where the API is private, and starts the way Streamlit Cloud runs it.
