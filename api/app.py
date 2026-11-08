@@ -49,7 +49,9 @@ class PropertyInput(BaseModel):
     property_state: str = "NORMAL"
     livable_surface: int = Field(..., gt=0)
     total_surface: Optional[int] = Field(None, ge=0, description="Plot surface in m²; 0 or missing means unknown.")
-    bedroom_count: int = Field(1, ge=0)
+    # Missing, not 1: a left-out count goes to the pipeline's median imputer
+    # (3 bedrooms), as a training row without one did.
+    bedroom_count: Optional[int] = Field(None, ge=0)
     build_year: int = Field(2000, ge=1800)
     garage: int = Field(0, ge=0, description="Treated as yes/no: any value above 0 means a garage.")
     garden_m2: int = Field(0, ge=0, description="Accepted for backward compatibility; the models do not use it.")

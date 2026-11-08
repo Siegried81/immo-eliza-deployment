@@ -68,7 +68,11 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     df = df.copy()
 
-    # Ensure required columns exist
+    # Ensure required columns exist. A count or distance the caller did not
+    # give is missing (None), not 0 or 1: the pipeline's median imputer then
+    # fills it as it did for a training row without it. The training data has
+    # every column, so these defaults only reach callers such as a direct
+    # engine.predict() with the required fields alone.
     defaults = {
         "property_state": "NORMAL",
         "build_year": CURRENT_YEAR,
@@ -77,11 +81,11 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
         "garage": 0,
         "terrace": 0,
         "swimming_pool": 0,
-        "bedroom_count": 1,
+        "bedroom_count": None,
         "energy_consumption_kWh_m2_year": 0,
-        "preschool_distance_m": 0,
-        "train_station_distance_m": 0,
-        "supermarket_distance_m": 0,
+        "preschool_distance_m": None,
+        "train_station_distance_m": None,
+        "supermarket_distance_m": None,
     }
 
     for column, value in defaults.items():

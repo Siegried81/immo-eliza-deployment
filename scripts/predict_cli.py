@@ -5,8 +5,8 @@ Answers are validated by the API's own schema (api.app.PropertyInput), then
 go through api.predict (vocabulary mapping, all five models, the trained
 routing threshold, the calibrated range), so the CLI cannot answer
 differently from the service. A blank optional field takes the API's default,
-which for plot surface and distances is "missing", imputed as in training: a
-0 there is a value the models never saw.
+which for plot surface, bedrooms and distances is "missing", imputed as in
+training: a 0 there is a value the models never saw.
 
 Run:
     python scripts/predict_cli.py
