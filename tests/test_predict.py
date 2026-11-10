@@ -210,3 +210,24 @@ class TestCityAliases:
             {"property_type": "house", "province": "Antwerp", "city": "Anvers"}, VOCABULARY)
         twice, _ = to_training_vocabulary(once, VOCABULARY)
         assert once == twice
+
+
+class TestEngineWithoutOptionalFields:
+    """The model card calls engine.predict on a dict with only the required fields."""
+
+    MINIMAL = {"postcode": 1050, "province": "Brussels", "city": "Ixelles",
+               "property_type": "APARTMENT", "livable_surface": 90}
+
+    def test_absent_counts_and_distances_are_missing_not_zero(self):
+        features = engine.predict(self.MINIMAL)["features"]
+        for name in ["bedroom_count", "preschool_distance_m", "train_station_distance_m",
+                     "supermarket_distance_m"]:
+            assert features[name] is None, name
+
+    def test_engine_and_api_give_the_same_price(self):
+        # build_year is sent: left out, the API uses 2000 while add_features
+        # fills CURRENT_YEAR, as it did for training rows without one.
+        minimal = {**self.MINIMAL, "build_year": 2000}
+        direct = engine.predict(minimal)["prediction"]
+        served = client.post("/predict", json=minimal).json()["prediction"]
+        assert round(direct, 2) == served

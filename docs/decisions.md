@@ -114,3 +114,38 @@ committed models were not replaced: the published figures are theirs.
   machine (see the 2026-10-12 entry on determinism). The 0.9 routing threshold
   still holds for the same reason. Range coverage on the check half: 77.9%,
   80.1% on average over 200 halvings.
+
+## 2026-11-08: a left-out bedroom count is missing, not 1
+
+- **What:** `api/app.py::PropertyInput.bedroom_count` defaults to `None`
+  instead of `1`. A request without it now reaches the pipeline as NaN and is
+  filled by the median imputer fitted in `src/train.py` (3 bedrooms).
+- **Why:** the schema promises that optional fields left out are imputed as in
+  training. Bedrooms were the exception: an API or CLI caller who skipped the
+  field got a one-bedroom price. Measured on the committed models, a 150 m²
+  Liège house went from €251,749 to €212,429 (-15.6%) and an 85 m² Elsene
+  apartment from €343,417 to €319,310 (-7.0%).
+- **What changes in the numbers:** only the price of requests that leave
+  `bedroom_count` out. A request that sends it, and every Streamlit request
+  (the UI always sends it), gets the same price as before. No model, metric or
+  README performance figure changes; no retraining.
+- **Revisit if:** the imputer strategy in `build_preprocessor()` changes.
+
+## 2026-11-08: a column the caller leaves out is missing in add_features
+
+- **What:** `src/features.py::add_features()` creates an absent
+  `bedroom_count`, `preschool_distance_m`, `train_station_distance_m` or
+  `supermarket_distance_m` column as missing (None) instead of 1 or 0. The
+  pipeline's median imputer then fills it.
+- **Why:** a distance of 0 m and one bedroom are real values, far from the
+  training medians (502 m, 2,000 m, 706 m, 3 bedrooms). The API always sends
+  these keys, so it never hit the defaults, but a direct `engine.predict()`
+  with the required fields alone did, and the Hugging Face model card shows
+  exactly that call. Measured on a 90 m² Ixelles apartment built in 2000: engine
+  €300,692, API €363,063 (-17.2%). After the fix both give €363,063.
+- **What changes in the numbers:** only direct engine calls that leave these
+  fields out. The training data has every column, so training, the committed
+  models and every published metric are unchanged; no retraining.
+- **Still open:** `build_year`. Left out, the API uses 2000, while
+  `add_features` fills a missing year with `CURRENT_YEAR` (age 0), as it did
+  for training rows. Which one is right is a modelling decision, not a typo.

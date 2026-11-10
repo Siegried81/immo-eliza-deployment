@@ -81,3 +81,22 @@ class TestQuantileRegressor:
             # "missing" is NaN on both sides, and NaN never equals itself.
             expected.pop("missing")
             assert {k: trained[k] for k in expected} == expected
+
+
+class TestOmittedBedroomCount:
+    """A request without bedroom_count is imputed like a training row without one."""
+
+    def test_omitted_bedroom_count_is_missing_not_one(self):
+        assert api.app.PropertyInput(**APARTMENT).bedroom_count is None
+
+    def test_omitted_bedroom_count_is_priced_at_the_training_median(self):
+        import joblib
+        from api.predict import MODEL_DIR
+        from src.features import NUMERIC_FEATURES
+
+        imputer = (joblib.load(MODEL_DIR / "pipeline.joblib").named_steps["preprocessor"]
+                   .named_transformers_["num"].named_steps["imputer"])
+        median = int(imputer.statistics_[NUMERIC_FEATURES.index("bedroom_count")])
+        omitted = client.post("/predict", json=APARTMENT).json()["prediction"]
+        at_median = client.post("/predict", json={**APARTMENT, "bedroom_count": median}).json()["prediction"]
+        assert omitted == at_median
