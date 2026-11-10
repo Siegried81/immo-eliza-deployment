@@ -1,12 +1,13 @@
 """
 Compare the deployed hard routing threshold with probability blends of the
 standard and luxury models, per price tier, on train.py's validation split.
+It's a design choice, so it stays off the sealed test split.
 
 A blend prices every property with both models, weighted by the luxury
 probability in log space, so there is no jump at the threshold. The
-classifier's probabilities are inflated by scale_pos_weight (~99), so the
+classifier's probabilities are inflated by scale_pos_weight (~98), so the
 script also tries them after isotonic calibration, fitted on one validation
-half (calibration_halves) and judged on the other, which played no part in it.
+half and judged on the other, which played no part in it.
 
 Read-only: it loads the committed models and writes nothing.
 
@@ -22,7 +23,9 @@ import numpy as np
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BASE_DIR / "src"))
-from train import TARGET, calibration_halves, load_dataset, price_tiers, split  # noqa: E402
+from sklearn.model_selection import train_test_split  # noqa: E402
+
+from train import SPLIT_SEED, TARGET, load_dataset, price_tiers, split  # noqa: E402
 
 MODEL_DIR = BASE_DIR / "models"
 DEPLOYED_THRESHOLD = 0.9
@@ -56,7 +59,7 @@ def main():
     proba = joblib.load(MODEL_DIR / "luxury_classifier.joblib").predict_proba(X)[:, 1]
     luxury_price = json.loads((MODEL_DIR / "luxury_threshold.json").read_text())["luxury_price_threshold"]
 
-    calib_index, _ = calibration_halves(val.index)
+    calib_index, _ = train_test_split(val.index, test_size=0.5, random_state=SPLIT_SEED)
     calib = val.index.isin(calib_index)
     iso = IsotonicRegression(out_of_bounds="clip").fit(
         proba[calib], (actual[calib] > luxury_price).astype(float))

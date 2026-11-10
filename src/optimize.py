@@ -51,7 +51,8 @@ if __name__ == "__main__":
     import optuna
 
     data = prepare()
-    study = optuna.create_study(direction="minimize")
+    # Seeded, so a re-run proposes the same trials.
+    study = optuna.create_study(direction="minimize", sampler=optuna.samplers.TPESampler(seed=42))
     study.optimize(lambda trial: objective(trial, data), n_trials=50)
 
     print("\n--- Optimization finished ---")

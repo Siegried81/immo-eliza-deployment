@@ -25,14 +25,28 @@ PIPELINE_LOWER_PATH = MODEL_DIR / "pipeline_lower.joblib"
 PIPELINE_UPPER_PATH = MODEL_DIR / "pipeline_upper.joblib"
 TARGET = "price"
 
-# Chosen on the validation split (scripts/evaluate_stratified.py): the
-# classifier's probabilities are inflated by scale_pos_weight (~99), so at 0.7
-# most routed properties were not luxury and jumped to a luxury-model price.
+# Chosen on the old validation split (scripts/evaluate_stratified.py,
+# 2026-10-11) and checked, not re-tuned, on the new one: it holds 19 luxury
+# rows, too few to tune on. The classifier's probabilities are inflated by
+# scale_pos_weight (~98), so at 0.7 most routed properties weren't luxury and
+# jumped to a luxury-model price.
 DEFAULT_ROUTING_THRESHOLD = 0.9
 
-# Train/validation split, shared with the evaluation scripts so they score
-# only rows that no model was fitted on.
-TEST_SIZE = 0.2
+# Four disjoint splits, drawn once with SPLIT_SEED and shared by every script:
+#   train        70%  fits every model and the preprocessor
+#   validation   10%  early stopping, the Optuna search, the routing threshold
+#   calibration   5%  the conformal margin of the price range, nothing else
+#   test         15%  sealed: only the final figures read it (monitoring/metrics.py,
+#                     scripts/evaluate_stratified.py --test, the range coverage)
+# Until 2026-11-10 there was one 80/20 split (LEGACY_VALIDATION_SIZE) and its
+# 20% did everything validation does now, plus the published figures. The test
+# rows are drawn from that old 80% only, so no earlier choice (the 0.9
+# threshold, the October search, the blend comparison) was ever scored on them.
+# Drawn with the same seed, a fresh 15% would sit entirely inside the old 20%.
+TEST_SIZE = 0.15
+CALIBRATION_SIZE = 0.05
+VALIDATION_SIZE = 0.10
+LEGACY_VALIDATION_SIZE = 0.2
 SPLIT_SEED = 42
 
 QUANTILE_LOWER = 0.10
@@ -47,12 +61,33 @@ def load_dataset(path=DATA_PATH):
     return add_features(pd.read_json(path))
 
 
+def split_all(frame):
+    """
+    (train, validation, calibration, test), the four splits described at the
+    top of this file. Each one is a slice of `frame`, so its index points back
+    to the original rows.
+    """
+    n = len(frame)
+    legacy_train, _ = train_test_split(frame, test_size=LEGACY_VALIDATION_SIZE,
+                                       random_state=SPLIT_SEED)
+    _, test = train_test_split(legacy_train, test_size=round(n * TEST_SIZE),
+                               random_state=SPLIT_SEED)
+    rest = frame.drop(index=test.index)
+    rest, calibration = train_test_split(rest, test_size=round(n * CALIBRATION_SIZE),
+                                         random_state=SPLIT_SEED)
+    train, validation = train_test_split(rest, test_size=round(n * VALIDATION_SIZE),
+                                         random_state=SPLIT_SEED)
+    return train, validation, calibration, test
+
+
 def split(frame):
     """
-    (train, validation) with the split every script shares, so evaluation,
-    the vocabulary export and the drift baseline all see the rows training saw.
+    (train, validation): the rows the models are fitted on and the rows they
+    early-stop and get tuned on. Scripts that need the training vocabulary or
+    the drift baseline use this; final figures use split_all()'s test split.
     """
-    return train_test_split(frame, test_size=TEST_SIZE, random_state=SPLIT_SEED)
+    train, validation, _, _ = split_all(frame)
+    return train, validation
 
 
 def price_bounds(train_prices):
@@ -82,21 +117,14 @@ def price_tiers(luxury_price):
             (f">= €{luxury_price / 1e6:.1f}M", luxury_price, float("inf"))]
 
 
-def calibration_halves(val_index):
-    """
-    Split the validation rows in two: one half calibrates the price range, the
-    other only measures the coverage obtained, so the reported coverage is not
-    computed on the rows that set the margin.
-    """
-    return train_test_split(val_index, test_size=0.5, random_state=SPLIT_SEED)
-
-
 def conformal_margin(lower_log, upper_log, y_log, coverage):
     """
     Conformalized quantile regression: the log-scale amount to widen (or, if
     negative, narrow) both bounds so that `coverage` of the calibration rows
     fall inside. Raw quantile models covered only ~71% instead of 80%; the
-    finite-sample quantile level gives the coverage guarantee on new rows.
+    finite-sample quantile level gives the coverage guarantee on new rows, as
+    long as the calibration rows played no part in fitting the bounds (no early
+    stopping on them either).
     """
     scores = np.maximum(lower_log - y_log, y_log - upper_log)
     level = min(1.0, np.ceil((len(scores) + 1) * coverage) / len(scores))
@@ -143,7 +171,7 @@ def train():
     """
     df = load_dataset()
     X = df.drop(columns=[TARGET])
-    X_train, X_val = split(X)
+    X_train, X_val, X_calib, X_test = split_all(X)
     bounds = price_bounds(df.loc[X_train.index, TARGET])
     y = clipped_log_target(df[TARGET], bounds)
     y_train, y_val = y.loc[X_train.index], y.loc[X_val.index]
@@ -151,14 +179,15 @@ def train():
     X_train_p = preprocessor.fit_transform(X_train, y_train)
     X_val_p = preprocessor.transform(X_val)
 
-    # Standard Regressor updated with Optuna parameters
+    # Standard regressor, with the parameters src/optimize.py found on the
+    # train and validation splits (2026-11-10, seeded search, 50 trials).
     model = XGBRegressor(
-        n_estimators=1468,
-        learning_rate=0.027741436539627594,
-        max_depth=9,
-        reg_lambda=2.477519238111168,
-        subsample=0.9261980084965962,
-        colsample_bytree=0.5662663812979505,
+        n_estimators=714,
+        learning_rate=0.08075316093557,
+        max_depth=8,
+        reg_lambda=6.337637256217289,
+        subsample=0.8078618752326912,
+        colsample_bytree=0.517705564570911,
         objective="reg:absoluteerror",
         random_state=42,
         early_stopping_rounds=50
@@ -181,7 +210,8 @@ def train():
     luxury_price_threshold = bounds[1]
     y_lux = (df[TARGET] > luxury_price_threshold).astype(int)
 
-    pos_weight = (y_lux == 0).sum() / max((y_lux == 1).sum(), 1)
+    y_lux_train = y_lux.loc[X_train.index]
+    pos_weight = (y_lux_train == 0).sum() / max((y_lux_train == 1).sum(), 1)
 
     clf = XGBClassifier(
         n_estimators=500,
@@ -229,33 +259,34 @@ def train():
             "luxury_model_available": luxury_model_available
         }, f)
 
-    # Calibrate the range on validation rows the API would give a range to
-    # (routed to the standard model), against real, unclipped prices.
-    lower_log = lower_model.predict(X_val_p)
-    upper_log = upper_model.predict(X_val_p)
-    y_val_log = np.log1p(df.loc[X_val.index, TARGET]).to_numpy()
-    standard = clf.predict_proba(X_val_p)[:, 1] < DEFAULT_ROUTING_THRESHOLD
-    calib_index, _ = calibration_halves(X_val.index)
-    calib = standard & X_val.index.isin(calib_index)
-    check = standard & ~X_val.index.isin(calib_index)
+    # Calibrate the range on the calibration split and measure it on the test
+    # split, keeping only rows the API would give a range to (routed to the
+    # standard model), against real, unclipped prices. Neither split served
+    # early stopping, so the margin and the coverage are both out of sample.
+    def standard_rows(X_part):
+        X_part_p = preprocessor.transform(X_part)
+        keep = clf.predict_proba(X_part_p)[:, 1] < DEFAULT_ROUTING_THRESHOLD
+        return (lower_model.predict(X_part_p)[keep], upper_model.predict(X_part_p)[keep],
+                np.log1p(df.loc[X_part.index, TARGET]).to_numpy()[keep])
 
-    margin = conformal_margin(lower_log[calib], upper_log[calib], y_val_log[calib], INTERVAL_COVERAGE)
+    calib_lower, calib_upper, calib_y = standard_rows(X_calib)
+    test_lower, test_upper, test_y = standard_rows(X_test)
+    margin = conformal_margin(calib_lower, calib_upper, calib_y, INTERVAL_COVERAGE)
 
     def coverage(m):
-        y = y_val_log[check]
-        return float(np.mean((y >= lower_log[check] - m) & (y <= upper_log[check] + m)))
+        return float(np.mean((test_y >= test_lower - m) & (test_y <= test_upper + m)))
 
     with open(INTERVAL_CALIBRATION_PATH, "w") as f:
         json.dump({
             "target_coverage": round(INTERVAL_COVERAGE, 2),
             "log_margin": margin,
-            "calibration_rows": int(calib.sum()),
-            "check_rows": int(check.sum()),
+            "calibration_rows": len(calib_y),
+            "check_rows": len(test_y),
             "check_coverage_raw": round(coverage(0.0), 4),
             "check_coverage_calibrated": round(coverage(margin), 4),
         }, f, indent=1)
     print(f"Price range: coverage {coverage(0.0):.1%} -> {coverage(margin):.1%} "
-          f"on {int(check.sum())} held-out rows (log margin {margin:+.3f})")
+          f"on {len(test_y)} test rows (log margin {margin:+.3f})")
 
     print("Training complete. Models updated.")
 

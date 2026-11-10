@@ -68,14 +68,14 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     df = df.copy()
 
-    # Ensure required columns exist. A count or distance the caller did not
-    # give is missing (None), not 0 or 1: the pipeline's median imputer then
-    # fills it as it did for a training row without it. The training data has
+    # Ensure required columns exist. A build year, count or distance the caller
+    # didn't give is missing (None), not 0, 1 or a year: the pipeline's median
+    # imputer then fills it as it did for a training row without it. The training data has
     # every column, so these defaults only reach callers such as a direct
     # engine.predict() with the required fields alone.
     defaults = {
         "property_state": "NORMAL",
-        "build_year": CURRENT_YEAR,
+        "build_year": None,
         "livable_surface": 0,
         "total_surface": None,
         "garage": 0,
@@ -124,8 +124,11 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
         .fillna(df["livable_surface"] * 1.2)
     )
 
-    # Property age
-    df["build_year"] = df["build_year"].fillna(CURRENT_YEAR)
+    # Property age. A missing build year stays missing, and so does the age:
+    # the pipeline's median imputer, fitted on the training split, fills both.
+    # It used to become CURRENT_YEAR (a new build) here, while the API sent
+    # 2000 for the same missing year. One rule now, for training and requests.
+    df["build_year"] = pd.to_numeric(df["build_year"], errors="coerce")
     df["property_age"] = CURRENT_YEAR - df["build_year"]
 
     # Swimming pool conversion

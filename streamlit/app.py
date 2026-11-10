@@ -122,13 +122,14 @@ def show_result(result: dict, livable_surface: int) -> None:
                 help="Output of the routing classifier. Above the threshold, the luxury model prices the property.")
 
     if segment == "luxury":
-        st.warning("Priced by the luxury model (properties around €1.9M and above). It learned from "
-                   "about 125 listings, so expect errors of around a third of the price, and no range "
+        st.warning("Priced by the luxury model (properties around €1.95M and above). It learned from "
+                   "about 110 listings, so expect errors of close to half the price, and no range "
                    "is available for this segment.")
     for note in result.get("notes", []):
         st.info(note)
-    st.caption("Estimation tool, not a valuation. On listings never seen in training, the average error "
-               "is 22% below €1M (about €70k) and prices are overestimated by about 7% there.")
+    st.caption("Estimation tool, not a valuation. On 2,362 test listings, the average error "
+               "is about 22% below €1M (about €70k, leaving out one listing with a wrong price) and "
+               "prices are overestimated by about 6% there.")
 
 
 st.set_page_config(page_title="Immo Eliza · Price estimator", page_icon="🏠", layout="wide")
@@ -138,7 +139,7 @@ st.session_state.setdefault("history", [])
 with st.sidebar:
     st.subheader("🏠 Immo Eliza")
     st.write("Price estimates for Belgian houses and apartments, from an XGBoost model "
-             "trained on ~12,600 listings scraped from Immovlan, and measured on ~3,150 others.")
+             "trained on ~11,000 listings scraped from Immovlan, and measured on ~2,360 others.")
     if api_is_awake():
         st.success("API online", icon="🟢")
     else:
@@ -146,7 +147,7 @@ with st.sidebar:
     if API_DOCS_URL:
         st.markdown(f"[API documentation]({API_DOCS_URL})")
     st.divider()
-    st.caption("How it works: a routing classifier sends likely luxury properties (≈ €1.9M+) to a "
+    st.caption("How it works: a routing classifier sends likely luxury properties (≈ €1.95M+) to a "
                "dedicated model; two quantile models (10th and 90th percentile) give the range for the others.")
 
 st.title("What is this property worth?")

@@ -52,7 +52,9 @@ class PropertyInput(BaseModel):
     # Missing, not 1: a left-out count goes to the pipeline's median imputer
     # (3 bedrooms), as a training row without one did.
     bedroom_count: Optional[int] = Field(None, ge=0)
-    build_year: int = Field(2000, ge=1800)
+    # Missing, not 2000: a left-out year goes to the pipeline's median imputer,
+    # like a training row without one (src/features.py::add_features).
+    build_year: Optional[int] = Field(None, ge=1800)
     garage: int = Field(0, ge=0, description="Treated as yes/no: any value above 0 means a garage.")
     garden_m2: int = Field(0, ge=0, description="Accepted for backward compatibility; the models do not use it.")
     terrace: int = Field(0, ge=0, description="Treated as yes/no: any value above 0 means a terrace.")
@@ -72,7 +74,7 @@ class PropertyInput(BaseModel):
     @classmethod
     def not_in_the_future(cls, value):
         """Checked against today's date, not a year frozen into the schema."""
-        if value > current_year():
+        if value is not None and value > current_year():
             raise ValueError(f"build_year cannot be after {current_year()}")
         return value
 

@@ -1,10 +1,11 @@
 """
-Score the standard model (no luxury routing) on train.py's validation split,
+Score the standard model (no luxury routing) on train.py's sealed test split,
 overall and per price tier.
 
-The validation split is the only data no model was fitted on (it does serve
-early stopping for the standard model). The earlier "true holdout" (rows
-absent from data/training_baseline.csv) still held ~80% of the training rows.
+The test split is the only data nothing was fitted, early-stopped, tuned or
+chosen on. The validation split did all of that, so it's no place for a
+headline figure. The earlier "true holdout" (rows absent from
+data/training_baseline.csv) still held ~80% of the training rows.
 """
 import json
 import sys
@@ -16,7 +17,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SRC_DIR = BASE_DIR / "src"
 sys.path.insert(0, str(SRC_DIR))
 
-from train import DATA_PATH, TARGET, load_dataset, price_tiers, split
+from sklearn.metrics import r2_score
+
+from train import DATA_PATH, TARGET, load_dataset, price_tiers, split_all
 
 PIPELINE_PATH = BASE_DIR / "models" / "pipeline.joblib"
 LUXURY_PRICE = json.loads((BASE_DIR / "models" / "luxury_threshold.json").read_text())["luxury_price_threshold"]
@@ -32,8 +35,8 @@ def evaluate_model():
         raise FileNotFoundError(f"Pipeline not found at: {PIPELINE_PATH}")
 
     pipeline = joblib.load(PIPELINE_PATH)
-    _, df = split(load_dataset())
-    print(f"Validation split: {len(df)} rows\n")
+    _, _, _, df = split_all(load_dataset())
+    print(f"Test split: {len(df)} rows\n")
 
     actual_prices = df[TARGET].values
     df_processed = df.drop(columns=[TARGET])
@@ -69,11 +72,12 @@ if __name__ == "__main__":
         mape = np.mean(abs_diffs / actuals) * 100
         mpe = np.mean(diffs / actuals) * 100
 
-        print("Performance evaluation (validation split, standard model only)")
+        print("Performance evaluation (test split, standard model only)")
         print(f"Total records evaluated : {len(predictions)}")
         print(f"MAE                     : €{mae:,.2f}")
         print(f"RMSE                    : €{rmse:,.2f}")
         print(f"MAPE                    : {mape:.2f}%")
+        print(f"R² (euros)              : {r2_score(actuals, predictions):.4f}")
 
         print(f"\nBias analysis")
         bias = "underestimating" if mpe > 0 else "overestimating"
