@@ -230,8 +230,8 @@ bias rather than the overall MAPE.
   give 422 with the list of accepted values.
 - **UI:** Streamlit. Province and city sit outside `st.form` so the city list
   follows the province. `api_is_awake()` pings at most once a minute, and the
-  predict timeout is 90 s because a sleeping Render instance takes up to a
-  minute to wake.
+  predict timeout is 120 s because a sleeping Render instance took 83 s to
+  wake on 2026-11-06.
 - **Hosting:** API on Render, UI on Streamlit Community Cloud, both reading
   `$PORT`. Locally, `docker-compose.yml` runs both, the UI reaching the API by
   its service name (`API_URL=http://api:8000`). The Hugging Face Space
