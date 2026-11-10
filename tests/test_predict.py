@@ -15,7 +15,8 @@ from fastapi.testclient import TestClient
 import api.app
 from api.app import app
 from api.predict import MODEL_DIR, engine
-from src.features import CITY_ALIASES, load_vocabulary, to_training_vocabulary
+from src.features import (CITY_ALIASES, NUMERIC_FEATURES, load_vocabulary,
+                          to_training_vocabulary)
 from src.train import conformal_margin
 
 client = TestClient(app)
@@ -218,16 +219,22 @@ class TestEngineWithoutOptionalFields:
     MINIMAL = {"postcode": 1050, "province": "Brussels", "city": "Ixelles",
                "property_type": "APARTMENT", "livable_surface": 90}
 
-    def test_absent_counts_and_distances_are_missing_not_zero(self):
+    def test_absent_counts_distances_and_year_are_missing_not_zero(self):
         features = engine.predict(self.MINIMAL)["features"]
         for name in ["bedroom_count", "preschool_distance_m", "train_station_distance_m",
-                     "supermarket_distance_m"]:
+                     "supermarket_distance_m", "build_year", "property_age"]:
             assert features[name] is None, name
 
     def test_engine_and_api_give_the_same_price(self):
-        # build_year is sent: left out, the API uses 2000 while add_features
-        # fills CURRENT_YEAR, as it did for training rows without one.
-        minimal = {**self.MINIMAL, "build_year": 2000}
-        direct = engine.predict(minimal)["prediction"]
-        served = client.post("/predict", json=minimal).json()["prediction"]
+        # build_year left out on both sides: one rule, the training median.
+        direct = engine.predict(self.MINIMAL)["prediction"]
+        served = client.post("/predict", json=self.MINIMAL).json()["prediction"]
         assert round(direct, 2) == served
+
+    def test_a_missing_build_year_is_priced_at_the_training_median(self):
+        imputer = engine.pipeline.named_steps["preprocessor"].named_transformers_["num"]
+        median_year = imputer.named_steps["imputer"].statistics_[NUMERIC_FEATURES.index("build_year")]
+        left_out = engine.predict(self.MINIMAL)["prediction"]
+        at_median = engine.predict({**self.MINIMAL, "build_year": int(median_year)})["prediction"]
+        assert median_year == int(median_year)
+        assert left_out == at_median

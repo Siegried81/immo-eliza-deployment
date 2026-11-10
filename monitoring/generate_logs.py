@@ -27,7 +27,7 @@ SYNTHETIC_LOG = PROJECT_ROOT / "monitoring" / "synthetic_logs.jsonl"
 SEED = 42
 
 
-def populate_logs(n=2000, path=SYNTHETIC_LOG):
+def populate_logs(n=1500, path=SYNTHETIC_LOG):
     """Replace `path` with `n` validation rows (sampled with a fixed seed) and their predictions."""
     from train import TARGET, load_dataset, split
 
@@ -46,4 +46,4 @@ def populate_logs(n=2000, path=SYNTHETIC_LOG):
 
 
 if __name__ == "__main__":
-    populate_logs(int(sys.argv[1]) if len(sys.argv) > 1 else 2000)
+    populate_logs(int(sys.argv[1]) if len(sys.argv) > 1 else 1500)

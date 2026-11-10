@@ -5,10 +5,8 @@ weak. The README says what the service does and how to run it; this document
 is for the person who has to change it.
 
 Every figure below was measured by the scripts named next to it and is quoted
-from the README or from `models/interval_calibration.json`. None was
-re-measured for this document: re-running `src/train.py` is deterministic on a
-given machine, but
-it is the only way the figures can move, and it is a separate decision.
+from the README or from `models/interval_calibration.json`. They come from the
+models retrained on 2026-11-10 with a sealed test split (`docs/decisions.md`).
 
 ---
 
@@ -42,9 +40,9 @@ All five run on every request; `api/app.py` then keeps one price.
 |---|---|---|
 | `models/pipeline.joblib` | `src/train.py` | Standard regressor, log-price, prices clipped to the 1st–99th percentile |
 | `models/pipeline_lower.joblib`, `pipeline_upper.joblib` | `src/train.py` | 10th and 90th percentile models for the range |
-| `models/luxury_classifier.joblib` | `src/train.py` | Probability that a property is above the 99th percentile of the training prices (€1.89M) |
+| `models/luxury_classifier.joblib` | `src/train.py` | Probability that a property is above the 99th percentile of the training prices (€1.95M) |
 | `models/pipeline_luxury.joblib` | `src/train.py` | Regressor trained only on the luxury rows, unclipped prices |
-| `models/luxury_threshold.json` | `src/train.py` | Luxury price (€1.89M) and routing threshold (0.9) |
+| `models/luxury_threshold.json` | `src/train.py` | Luxury price (€1.95M) and routing threshold (0.9) |
 | `models/interval_calibration.json` | `src/train.py` | Conformal margin for the range, with the coverage it reaches |
 | `models/categories.json` | `scripts/export_categories.py` | The categories the models were fitted on |
 
@@ -95,20 +93,28 @@ surface or distances, which moved a typical Liège house by about +14%
 
 - **Data:** `data/clean/cleaned_data.json`, 15,746 listings scraped from
   Immovlan. It is git-ignored, so a fresh clone cannot retrain.
-- **Split:** 80/20, `SPLIT_SEED = 42`, `TEST_SIZE = 0.2`. The evaluation scripts
-  import these constants, so they score the same 3,150 validation rows that no
-  model was fitted on. The standard and quantile models do use them for early
-  stopping.
-- **Target:** `log1p(price)`, clipped to the 1st–99th percentile for the
+- **Split:** four disjoint parts from `split_all()`, `SPLIT_SEED = 42`. Train
+  11,022 rows (fits everything), validation 1,575 (early stopping, the Optuna
+  search, checking the routing threshold), calibration 787 (the range's margin
+  only), test 2,362 (sealed: only the final figures read it). The test rows
+  come from the old 80% training split, so the October threshold choice and
+  search never scored them (a fresh 15% with the same seed would have sat
+  inside the old 20% validation split). Every script imports these helpers,
+  so they all see the same rows.
+- **Target:** `log1p(price)`, clipped to the 1st to 99th percentile for the
   standard and quantile models, the percentiles taken on the training rows
-  only (`price_bounds`). The clip caps the standard model at €1.89M,
+  only (`price_bounds`). The clip caps the standard model at about €1.95M (€1,948,950),
   which is why the luxury path exists.
-- **Standard regressor:** XGBoost, `reg:absoluteerror`, hyperparameters from an
-  Optuna search (`src/optimize.py`) hard-coded into `train.py`.
-- **Luxury classifier:** XGBoost with `scale_pos_weight ≈ 97` (ratio of
-  non-luxury to luxury rows). That weight inflates the probabilities, which is
+- **Missing build year:** stays missing in `add_features()`, like at the API,
+  and the median imputer fills it with the training median (1974). It used to
+  be 2000 at the API and the current year in training.
+- **Standard regressor:** XGBoost, `reg:absoluteerror`, hyperparameters from a
+  seeded Optuna search on the train and validation splits (`src/optimize.py`),
+  hard-coded into `train.py`.
+- **Luxury classifier:** XGBoost with `scale_pos_weight ≈ 98` (ratio of
+  non-luxury to luxury training rows). That weight inflates the probabilities, which is
   why the routing threshold sits as high as 0.9 (section 4).
-- **Luxury regressor:** trained on the 125 luxury rows of the training split,
+- **Luxury regressor:** trained on the 111 luxury rows of the training split,
   on **unclipped** prices. Training it on the clipped target made every luxury
   target €1.9M and the model a constant (README, bug #7); a test now fails if
   it becomes constant again.
@@ -120,74 +126,95 @@ surface or distances, which moved a typical Liège house by about +14%
 
 ## 4. Luxury routing
 
-The classifier decides which regressor prices the property. On the validation
-split (`scripts/evaluate_stratified.py`, README "Luxury Routing"):
+The classifier decides which regressor prices the property. On the sealed test
+split (`scripts/evaluate_stratified.py --test`, README "Luxury Routing"):
 
-| Routing | Overall MAPE | < €1M | €1M–€1.89M | ≥ €1.89M (36 rows) |
+| Routing | Overall MAPE | < €1M | €1M to €1.95M | ≥ €1.95M (21 rows) |
 |---|---:|---:|---:|---:|
-| None | 22.5% | 22.1% | 27.1% | 45.1% |
-| **0.9 (chosen)** | **23.0%** | **22.4%** | **35.3%** | **35.8%** |
+| None | 26.2% | 25.9% | 28.1% | 51.6% |
+| **0.9 (deployed)** | **26.5%** | **26.0%** | **34.7%** | **46.2%** |
+
+The first two columns carry one €3,048 listing, a data error worth 4 points
+of MAPE on its own (section 6).
 
 What a reader has to know:
 
-- **Routing is kept for the top tier, not for the average.** It costs 0.5 point
-  of overall MAPE and 8 points on the €1M–€1.89M tier, and it cuts the luxury
-  bias from −45% to −29%.
-- **0.9 is kept, not proven best.** With 36 luxury rows, one property moves
-  the tier's MAPE by about 3 points; 0.85, 0.9 and 0.95 are within one or two
-  properties of each other.
+- **Routing is kept for the top tier, not for the average.** It costs 0.3 point
+  of overall MAPE and 7 points on the €1M to €1.95M tier, and it cuts the luxury
+  bias from −51.6% to −43.0%.
+- **0.9 is kept, not proven best.** It was picked on the old validation split
+  and only checked on the new one, which has 19 luxury rows. There it cuts the
+  luxury MAPE from 51.2% to 44.0%. With 21 luxury rows in the test split, one
+  property moves the tier's MAPE by about 5 points.
 - **The switch is hard.** A property just under and just over the threshold can
   get prices €1M apart. The obvious fixes were measured and rejected
-  (`scripts/evaluate_routing_blend.py`): a log-space blend weighted by the raw
-  probability helps the €1.89M+ tier (35.8% → 24.2% MAPE) but pushes the
-  < €1M bias from +7.1% to +19.9%, because that probability is inflated by
-  `scale_pos_weight`; weighted by an isotonic-calibrated probability it helps
-  the €1M–€1.89M tier (35.3% → 27.7%) and slightly hurts the €1.89M+ tier
-  (35.8% → 36.0%). Neither beats the threshold where the threshold matters.
+  (`scripts/evaluate_routing_blend.py`, validation split): a log-space blend
+  weighted by the raw probability helps the €1.95M+ tier (44.0% → 32.4% MAPE)
+  but pushes the < €1M bias from +7.9% to +20.3%, because that probability is
+  inflated by `scale_pos_weight`; weighted by an isotonic-calibrated
+  probability it helps both upper tiers (30.7% → 24.6%, 44.0% → 39.5%) and
+  costs the < €1M tier (23.0% → 23.6%). That's on 52 rows between €1M and
+  €1.95M and 19 above, too few to switch.
 
 ---
 
 ## 5. The price range
 
-The standard segment returns a 10th–90th percentile range from two quantile
-models. On unseen rows the raw models held the real price only ~71% of the
+The standard segment returns a 10th to 90th percentile range from two quantile
+models. On the test split the raw models hold the real price 73.6% of the
 time, not 80% (README, bug #10).
 
 `train.py` applies **conformalized quantile regression** (CQR):
 
-1. split the standard-routed validation rows in two halves (`calibration_halves`);
-2. on the first half, compute for each row how far the real log-price falls
-   outside the raw range, and take the finite-sample quantile of those scores
-   that gives 80% coverage (`conformal_margin`);
+1. keep the calibration-split rows the API would give a range to (routed to
+   the standard model);
+2. compute for each row how far the real log-price falls outside the raw
+   range, and take the finite-sample quantile of those scores that gives 80%
+   coverage (`conformal_margin`);
 3. widen both bounds by that margin, and measure the coverage on the
-   **second** half, which played no part in choosing it.
+   standard-routed **test** rows.
+
+The guarantee needs the calibration rows to be exchangeable with new ones, so
+they must play no part in fitting the bounds. Until 2026-11-10 they were half
+of the validation split, which also early-stopped the quantile models, so it
+didn't strictly hold. The calibration split now serves nothing else.
 
 From `models/interval_calibration.json`:
 
 | | Value |
 |---|---:|
-| Calibration rows / check rows | 1,556 / 1,555 |
-| Log margin | +0.0444 (bounds × / ÷ 1.045) |
-| Coverage on the check half, raw | 70.7% |
-| Coverage on the check half, calibrated | 77.9% |
+| Calibration rows / test rows | 781 / 2,344 |
+| Log margin | +0.0483 (bounds × / ÷ 1.049) |
+| Coverage on the test split, raw | 73.6% |
+| Coverage on the test split, calibrated | 80.9% |
 
-Over 200 random halvings the coverage averages 80.1% (75.7% to 83.9%), so
-77.9% is one draw below the target, not a systematic shortfall. No range is
-returned for the luxury segment: the quantile models describe the standard
-model's estimate, and 125 rows are too few for a stable quantile fit.
+Over 200 random re-draws of the calibration and test rows (same models), the
+coverage averages 80.1% (76.2% to 84.7%). No range is returned for the luxury
+segment: the quantile models describe the standard model's estimate, and 111
+rows are too few for a stable quantile fit.
 
 ---
 
 ## 6. Evaluation: what the numbers mean
 
-All model figures are on the 3,150-row validation split. An earlier "holdout"
-(rows absent from `data/training_baseline.csv`) still contained 3,938 of its
-4,944 rows from the training split, which made MAPE look like 16.8% instead
-of 22.4% and tuned the routing threshold on training data (README, bug #8).
+All model figures are on the 2,362-row test split, which nothing was fitted,
+early-stopped, tuned or chosen on. The validation split did all of that, so
+its scores are optimistic and never published as a headline (README, bug #13).
+An earlier "holdout" (rows absent from `data/training_baseline.csv`) was worse:
+it still contained 3,938 of its 4,944 rows from the training split, which made
+MAPE look like 16.8% instead of 22.4% on the old validation split (README,
+bug #8).
 
-Standard model alone (`monitoring/metrics.py`): MAE €92,685, MAPE 22.52%,
-bias +5.06%. By tier, MAPE is 22.09% below €1M, 27.10% between €1M and €1.89M,
-and 45.07% above €1.89M.
+Standard model alone (`monitoring/metrics.py`): MAE €92,024, MAPE 26.24%,
+median APE 14.85%, R² 0.646 (euros), bias +7.88%. By tier, MAPE is 25.94%
+below €1M, 28.13% between €1M and €1.95M, and 51.59% above €1.95M.
+
+One test row is a data error: a 77 m² Oostende apartment at €3,048, priced
+€297,380 by the model. That's a 9,657% error, and on its own it adds 4 points
+to the MAPE (22.17% without it) and 4 points to the bias (+3.79% without it).
+It stays in: removing a row after seeing the score is a choice made on the
+test split. The cleaning step should drop prices like that, and the next
+retraining will need a new test split once it does.
 
 MAPE is the headline because a buyer thinks in percent of the price, but it
 weights a €150k flat and a €3M villa equally. That is why every table is
@@ -225,7 +252,7 @@ bias rather than the overall MAPE.
   error in `/predict` is logged with its traceback and answered with a generic
   500, never the exception text. `build_year` is bounded by today's date, not
   by a year written into the schema.
-- **Tests:** 89, offline, run by `.github/workflows/tests.yml` on every push
+- **Tests:** 106, offline, run by `.github/workflows/tests.yml` on every push
   and pull request. They cover the vocabulary mapping, the real model's
   behaviour (house ≠ apartment, province and condition move the price, the
   luxury model is not constant), the conformal margin, the API contract and
@@ -262,15 +289,16 @@ These are found by reading the code. Each one is its own change.
   up to 0.4 in log price), because XGBoost's result depends on the CPU and
   thread count it ran on. The committed models are now the ones trained in the
   python:3.12 Linux image, the image the service is deployed with, so
-  `python src/train.py` run in that image reproduces them.
+  `python src/train.py` run in that image reproduces them. The 2026-11-10
+  models were trained in python:3.12 with the pinned versions.
 - **Two scripts, two sets of figures.** `monitoring/metrics.py` scores the
-  standard model alone (below €1M: €67,693 MAE; the same model shows +6.7%
-  bias in `evaluate_stratified.py`'s no-routing row);
-  `scripts/evaluate_stratified.py` scores what the API serves, routing
-  included (below €1M at 0.9: €70,377 MAE, +7.1% bias). The UI caption and the
+  standard model alone (26.24% MAPE overall); `scripts/evaluate_stratified.py
+  --test` scores what the API serves, routing included (26.5% overall). Below
+  €1M they nearly agree on the test split (€68,579 and €69,601 MAE), because
+  0.9 routes one of those 2,254 rows. The UI caption and the
   README's limitations quote the second; the README's performance table quotes
   the first. Both are right, as long as each figure says which one it is.
-- **Luxury rows are few.** 125 rows to fit a regressor and 36 to judge it:
+- **Luxury rows are few.** 111 rows to fit a regressor and 21 to judge it:
   every luxury figure has a wide uncertainty that a single number hides.
 
 ### DRY
@@ -293,10 +321,10 @@ LLM call could add value, with schema validation and a fallback:
 ### Strategy and business
 
 - **What it is for:** a first estimate for a buyer or a seller, not a
-  valuation. About 22% average error below €1M (≈ €70k as deployed) is useful to sort
+  valuation. About 22% average error below €1M (≈ €70k as deployed, without the one bad test row) is useful to sort
   listings, not to set a price; the app says so next to every estimate.
-- **Where it is weakest is where the money is.** Above €1.89M the error is
-  around a third of the price, mostly underestimation.
+- **Where it is weakest is where the money is.** Above €1.95M the error is
+  close to half the price (46.2% on the test split), mostly underestimation.
 - **The data ages.** One scrape, no refresh pipeline, and no real traffic has
   been logged durably yet (see above). A product version needs a
   scheduled re-scrape, retraining on a fixed cadence, and the same tier tables

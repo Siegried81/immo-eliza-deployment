@@ -30,8 +30,9 @@ from monitoring import check_drift, monitor  # noqa: E402
 from scripts.predict_cli import parse_answers  # noqa: E402
 from src.features import (CATEGORICAL_FEATURES, MONITORED_FEATURES,  # noqa: E402
                           NUMERIC_FEATURES)
-from src.train import (DATA_PATH, SPLIT_SEED, TEST_SIZE, build_preprocessor,  # noqa: E402
-                       clipped_log_target, price_bounds, price_tiers, split)
+from src.train import (DATA_PATH, LEGACY_VALIDATION_SIZE, SPLIT_SEED, build_preprocessor,  # noqa: E402
+                       clipped_log_target, price_bounds, price_tiers, split,
+                       split_all)
 
 APARTMENT = {"postcode": 1050, "province": "Brussels", "city": "Elsene",
              "property_type": "apartment", "livable_surface": 85}
@@ -174,14 +175,26 @@ class TestSharedTrainingHelpers:
     def test_only_property_age_is_left_out_of_drift(self):
         assert set(NUMERIC_FEATURES) - set(MONITORED_FEATURES) == {"property_age"}
 
-    def test_split_matches_the_split_training_always_used(self):
-        X = pd.DataFrame({"a": range(200)})
-        y = pd.Series(range(200)) * 2.0
-        old_train, old_val, old_y_train, _ = train_test_split(
-            X, y, test_size=TEST_SIZE, random_state=SPLIT_SEED)
+    def test_the_four_splits_are_disjoint_and_cover_every_row(self):
+        X = pd.DataFrame({"a": range(2000)})
+        parts = split_all(X)
+        indexes = [set(part.index) for part in parts]
+        assert sum(len(i) for i in indexes) == len(X)
+        assert set().union(*indexes) == set(X.index)
+        assert [len(p) for p in parts] == [1400, 200, 100, 300]
+
+    def test_no_test_row_was_in_the_old_validation_split(self):
+        # The old 20% picked the threshold and scored the October search.
+        X = pd.DataFrame({"a": range(2000)})
+        _, old_validation = train_test_split(X, test_size=LEGACY_VALIDATION_SIZE,
+                                             random_state=SPLIT_SEED)
+        assert not set(split_all(X)[3].index) & set(old_validation.index)
+
+    def test_split_returns_train_and_validation_only(self):
+        X = pd.DataFrame({"a": range(2000)})
+        train, validation, _, _ = split_all(X)
         new_train, new_val = split(X)
-        assert new_train.index.equals(old_train.index) and new_val.index.equals(old_val.index)
-        assert y.loc[new_train.index].equals(old_y_train)
+        assert new_train.index.equals(train.index) and new_val.index.equals(validation.index)
 
     def test_clipped_log_target_clips_to_the_given_bounds(self):
         prices = pd.Series(np.linspace(10_000, 5_000_000, 1000))
