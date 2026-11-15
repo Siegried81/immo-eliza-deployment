@@ -57,7 +57,10 @@ class PropertyInput(BaseModel):
     build_year: Optional[int] = Field(None, ge=1800)
     garage: int = Field(0, ge=0, description="Treated as yes/no: any value above 0 means a garage.")
     garden_m2: int = Field(0, ge=0, description="Accepted for backward compatibility; the models do not use it.")
-    terrace: int = Field(0, ge=0, description="Treated as yes/no: any value above 0 means a terrace.")
+    # Missing, not 0: 5.7% of the training listings don't say, and the median
+    # imputer filled them with 1 (a terrace). Send 0 for "no terrace".
+    terrace: Optional[int] = Field(None, ge=0, description="Treated as yes/no: any value above 0 means a "
+                                                           "terrace, 0 means none. Left out, it is unknown.")
     swimming_pool: bool = False
     energy_consumption_kWh_m2_year: int = Field(
         0, ge=0, description="kWh/m2/year. 0, or a value above 1000, is read as unknown: "

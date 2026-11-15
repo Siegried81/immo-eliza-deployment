@@ -381,3 +381,53 @@ the error on listings under €150k.
 - **Still true after today's fixes:** the pull towards the middle of the
   market. Listings under €150k are estimated 22% too high at the median.
   Nothing in the inputs tells a ruin or a share from a house.
+
+## 2026-11-15: audit of the day's changes, two fixes and one caveat
+
+Checks run on `main` after PR #27, and what they gave:
+
+- **Splits:** four disjoint splits, 11,020 / 1,575 / 787 / 2,361, the three
+  rows under €10,000 gone, no test row in the old validation split.
+- **Leakage:** `models/locations.json` equals the centroids of the training
+  rows alone, and differs from centroids built on all rows.
+- **Reproducibility:** `src/train.py` run from scratch in the python:3.12
+  image gives the five committed models with a maximum difference of 0.0 on
+  every row, and the same `interval_calibration.json`, `luxury_threshold.json`
+  and `categories.json`. `evaluate_stratified.py --test` and
+  `monitoring/metrics.py` print the published figures.
+- **Train/serve parity:** 400 test listings replayed through `PropertyInput`
+  and `engine.predict()`, against the pipeline that is scored. 36 can't be
+  sent (33 have no livable surface, 3 a build year the schema refuses: 1650,
+  2027, 2028). Of the 364 others, 340 matched to the last digit and 24 did
+  not. See the first fix.
+- **Deployment:** the Render API returns the retrained models' prices
+  (€241,607.50 for the Liège house in 4000, €229,781.33 in 4020).
+
+**Fix 1, a left-out terrace is missing, not 0.** `PropertyInput.terrace`
+defaulted to 0 while a training listing that doesn't say (5.7% of them) was
+imputed with the median, 1. The 24 listings above came out up to 13% lower
+through the API (4.5% at the median). It now defaults to None, and
+`add_features()` fills an absent `terrace` or `livable_surface` with missing
+instead of 0. What changes: only requests that leave `terrace` out (€236,847
+before, €241,607 after, on the Liège house). The UI and any request that
+sends the field are unchanged. After the fix the replay matches on all 364.
+Garage and pool keep 0: no training row lacks them.
+
+**Fix 2, cities are filed under their province in `locations.json`.** Nine
+city names exist in two provinces. Filed by name alone, each pair shared one
+centroid and one usual postcode, so the form started Antwerp's Vorst on 1190
+and Flemish Brabant's Deurne on 2100. The file now has 1,542 city entries
+under 11 provinces (was 1,533 names; the 2026-11-15 postcode entry quotes
+that count). No model or metric changed: a training row always finds its own
+postcode's centroid, so the city entry is only read for a postcode the
+training rows don't have, and the retraining above was run with this fix in.
+
+**Caveat, not fixed: the same building on both sides of the split.** 155 test
+listings share their address with a training listing, and 27 are exact twins
+(same coordinates, price, surface and bedrooms). As deployed the error is
+10.7% on the 155 and 21.3% on the 2,206 others (20.6% below €1M), against
+20.6% and 19.9% published on all test rows. The published figures are right
+for a listing drawn like the data; for a building the models never saw they
+are about 0.7 point optimistic. The README limitations now say so. A split
+grouped by address would fix it and would mean a new test split, which is a
+design decision.

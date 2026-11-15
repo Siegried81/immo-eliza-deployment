@@ -173,7 +173,8 @@ with inputs:
         city = c2.selectbox("City *", city_names, index=city_names.index(most_listed),
                             help="Only cities present in the training data are listed.")
         postcode = c3.number_input("Postcode *", min_value=1000, max_value=9999, step=1,
-                                   value=CITY_POSTCODES.get(city, 1000), key=f"postcode-{city}",
+                                   value=CITY_POSTCODES[province].get(city, 1000),
+                                   key=f"postcode-{province}-{city}",
                                    help="Starts on the city's usual postcode. The estimate uses it.")
         if cities[city] < LOW_SAMPLE_CITY:
             st.caption(f"Only {cities[city]} listings in {city}: the estimate leans on the province.")

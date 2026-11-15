@@ -26,7 +26,7 @@ price of a Belgian house or apartment, as served by the API and the web app in
 | `luxury_threshold.json` | Routing threshold: at or above 0.9 the luxury model prices the property |
 | `interval_calibration.json` | Conformal margin that widens the quantile range to 80% coverage |
 | `categories.json` | The categories the models were trained on (cities, provinces, states) |
-| `locations.json` | Where each training postcode and city is (median coordinates of its listings), and each city's usual postcode |
+| `locations.json` | Where each training postcode and city is (median coordinates of its listings), and each city's usual postcode, cities filed by province |
 
 ## How to use
 

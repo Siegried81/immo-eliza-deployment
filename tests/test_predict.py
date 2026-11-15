@@ -219,6 +219,7 @@ class TestLocation:
     """The models read where the postcode is, from centroids of the training rows."""
 
     LISTINGS = pd.DataFrame({
+        "province": ["liege", "liege", "liege", "east-flanders"],
         "city": ["Liege", "Liege", "Liege", "Gent"],
         "postcode": [4000, 4000, 4020, 9000],
         "latitude": [50.64, 50.66, 50.60, 51.05],
@@ -230,8 +231,28 @@ class TestLocation:
 
         locations = build_locations(self.LISTINGS)
         assert locations["postcodes"]["4000"] == [50.65, 5.57]
-        assert locations["cities"]["Liege"] == [50.64, 5.58]
-        assert locations["city_postcodes"] == {"Liege": 4000, "Gent": 9000}
+        assert locations["cities"]["liege"]["Liege"] == [50.64, 5.58]
+        assert locations["city_postcodes"] == {"liege": {"Liege": 4000}, "east-flanders": {"Gent": 9000}}
+
+    def test_a_city_name_in_two_provinces_is_two_places(self):
+        """Halle is a town near Brussels and a village near Antwerp."""
+        from src.features import add_location, build_locations
+
+        listings = pd.DataFrame({
+            "province": ["vlaams-brabant", "vlaams-brabant", "antwerp"],
+            "city": ["Halle", "Halle", "Halle"], "postcode": [1500, 1500, 2980],
+            "latitude": [50.73, 50.74, 51.24], "longitude": [4.23, 4.24, 4.65]})
+        locations = build_locations(listings)
+        assert locations["city_postcodes"]["antwerp"]["Halle"] == 2980
+        assert locations["city_postcodes"]["vlaams-brabant"]["Halle"] == 1500
+        request = pd.DataFrame([{"postcode": None, "province": "antwerp", "city": "Halle"}])
+        assert add_location(request, locations).loc[0, "area_latitude"] == 51.24
+
+    def test_a_city_filed_under_another_province_still_has_a_place(self):
+        from src.features import add_location, build_locations
+
+        request = pd.DataFrame([{"postcode": None, "province": "namur", "city": "Gent"}])
+        assert add_location(request, build_locations(self.LISTINGS)).loc[0, "area_latitude"] == 51.05
 
     @pytest.mark.parametrize("postcode, city, expected", [
         (4020, "Liege", (50.60, 5.60)),      # the postcode's own centroid
@@ -254,10 +275,10 @@ class TestLocation:
         from src.features import load_locations
 
         locations = load_locations()
-        for province in VOCABULARY["provinces"].values():
+        for slug, province in VOCABULARY["provinces"].items():
             for city in province["cities"]:
-                assert city in locations["cities"], city
-                assert 1000 <= locations["city_postcodes"][city] <= 9999
+                assert city in locations["cities"][slug], city
+                assert 1000 <= locations["city_postcodes"][slug][city] <= 9999
 
     def test_the_postcode_changes_the_price(self):
         """Same city, same house: Sart-Tilman (4031) and the centre (4000) are
@@ -270,6 +291,26 @@ class TestLocation:
         result = engine.predict({**HOUSE_IN_LIEGE, "postcode": 9999})
         assert any("postcode 9999" in note for note in result["notes"])
         assert not any("postcode" in note for note in engine.predict(HOUSE_IN_LIEGE)["notes"])
+
+
+class TestUnknownFields:
+    """A field the caller leaves out is priced like a training row without it."""
+
+    def test_a_left_out_terrace_is_unknown_not_absent(self):
+        """Training filled an unknown terrace with the median, 1. The API used
+        to send 0, so the same listing was priced up to 13% lower by the API
+        than by the pipeline that was scored."""
+        request = {k: v for k, v in HOUSE_IN_LIEGE.items() if k != "terrace"}
+        assert api.app.PropertyInput(**request).terrace is None
+        left_out = client.post("/predict", json=request).json()["prediction"]
+        with_one = client.post("/predict", json={**request, "terrace": 1}).json()["prediction"]
+        assert left_out == with_one
+
+    def test_engine_alone_fills_a_missing_surface_or_terrace_like_training(self):
+        from src.features import add_features
+
+        df = add_features(pd.DataFrame([{"property_type": "house", "province": "liege", "city": "Liege"}]))
+        assert df[["livable_surface", "terrace", "total_surface"]].isna().all(axis=None)
 
 
 class TestCityAliases:

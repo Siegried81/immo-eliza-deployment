@@ -4,10 +4,10 @@ Deployment phase of the **Immo Eliza Machine Learning** project: a REST API + we
 
 - 🚀 FastAPI backend + 🎨 Streamlit frontend
 - 🤖 XGBoost regression, with a luxury-segment model + routing classifier
-- ✅ Automated pytest suite (125 tests, API and UI, no network, run in CI)
+- ✅ Automated pytest suite (129 tests, API and UI, no network, run in CI)
 - 📊 Prediction logging, PSI-based drift detection
 - 📏 Headline figures on a sealed test split (2,361 listings) that nothing was fitted, tuned or chosen on
-- 🔎 Audited end to end: [17 bugs found and fixed](#bugs-found-and-fixed), including one that made the model ignore property type and province and a luxury model that always answered €1.9M
+- 🔎 Audited end to end: [19 bugs found and fixed](#bugs-found-and-fixed), including one that made the model ignore property type and province and a luxury model that always answered €1.9M
 - 📘 [Technical deep dive](docs/technical_deep_dive.md): how each model, the routing and the price range work, why, and what is still weak
 
 ---
@@ -169,6 +169,8 @@ An end-to-end audit of the deployed service (not just the notebook metrics) foun
 | 15 | The cleaned data names the energy column `energy_consumption_kWh/m2/year`; the code read `energy_consumption_kWh_m2_year`. `add_features()` found no such column, created it at 0 and filled every row with the figure for its state. | **The models never read a real energy consumption**, though 12,841 of 15,746 listings give one. To them the field was a second code for the state (80 = new, 300 = to demolish), so a user who typed 250 kWh, close to the median listing (264), was priced like a ruin: **-16%** on a 150 m² Liège house (€220,580 → €184,617). | `to_model_columns()` renames the column and refuses listings with a model input missing. A value of 0 or above 1,000 kWh counts as not given. The figure used when none is given is now the median of the training listings in that state (260 kWh for a normal state, was 130). Optuna re-run, all five models retrained: below €1M the test error went from 21.8% to 21.3% (without the bad row) with this fix alone, and 250 kWh now prices within 5% of a consumption left out. |
 | 16 | `postcode` is required by the API and the form, and no model read it. The city was the only location, through one target-encoded number. | Two houses in the same city and different postcodes got the same price, and the models knew nothing of which cities are neighbours. | The models read the postcode and the median coordinates of its training listings (`add_location()`, `models/locations.json`; the city's when the postcode is new). Trained on centroids, not each listing's own coordinates, because a request has no coordinates. In cross-validation this took a point off the error below €1M (21.7% → 20.7%). The form starts the postcode on the city's usual one instead of 1000. |
 | 17 | Three listings are priced under €10,000 (a 209 m² house at €2,500, another at €5,000, a flat at €3,048), then nothing until €19,900. The flat sat in the test split, where its 9,430% error added 4 points to the average error. | Two training rows taught the models a price that isn't one, and every headline figure needed a "without one bad row" footnote. | `MIN_PLAUSIBLE_PRICE = 10_000` in `src/train.py`: `split_all()` drops those rows from every split, after the draw, so no other row changes split. The rule reads the price alone, never a model's error. |
+| 18 | The API defaulted a left-out `terrace` to 0. 5.7% of the training listings don't say whether there is one, and the median imputer filled them with 1. | Replaying 364 test listings through the API, the 24 with an unknown terrace came out up to **13% lower** than the pipeline that was scored (4.5% at the median); the 340 others matched exactly. On a 150 m² Liège house: €236,847 left out, €241,607 with a terrace. The UI always sends the field, so it was not affected. | `terrace` defaults to *missing*, like the other optional fields; send 0 for "no terrace". `add_features()` no longer fills an absent terrace or surface with 0. The replay now matches on all 364. |
+| 19 | `models/locations.json` filed cities by name alone, and nine names exist in two provinces (Halle, Deurne, Vorst, Perwez, Celles...). Introduced with bug #16's fix, found by the audit the same day. | The form started Antwerp's Vorst on postcode 1190 (Brussels) and Flemish Brabant's Deurne on 2100 (Antwerp), so the estimate was for the other town unless the user corrected it. | Cities are filed under their province. No model changed: training rows always find their own postcode, so a full retraining gives the same five models, bit for bit. |
 
 Tests also wrote every request into `monitoring/logs.json`, polluting the drift report; logging is now disabled in tests.
 
@@ -344,6 +346,7 @@ This is an **estimation tool, not a valuation system**.
 
 - **Accuracy:** as deployed (routing at 0.9), on the 2,361 test listings: 20.6% average error, 12.9% median. Below €1M it's 19.9% (≈ €64k) and 12.5% median: half the estimates land within 13% of the asking price, two in three within 20%.
 - **Cheap and expensive listings:** estimates run high under €150k (82% of them above the asking price, median +22%) and low between €500k and €1M (69% below, median −10%). Between €250k and €500k they are balanced. The mean bias below €1M (+5.1%) comes from the cheap end; the median bias is +0.3%.
+- **Same building, both sides of the split:** 155 of the 2,361 test listings share their address with a training listing (flats in one development, one address appears 33 times in the data). On those the error is 10.7%; on the 2,206 others it's 21.3% (20.6% below €1M, 13.4% median). For a property in a building the models have never seen, read the second figure. The split is random by listing, not by address.
 - **Location is the postcode's centroid**, not the street: two houses in one postcode get the same location. A postcode with no training listing (about 1% of the test listings) falls back to the city's centroid, and the response says so. Figures from `scripts/evaluate_stratified.py --test`; the standard model alone is in [Model Performance](#model-performance--monitoring).
 - **High-end properties (€1.95M+):** the luxury model learned from 111 listings and is judged on 21; expect errors around half the price, typically underestimation. The standard model underprices expensive homes systematically (−50.6% on this tier without routing); routing cuts that bias to −41.3%, it doesn't remove it.
 - **Routing trade-off:** routing helps the luxury tier but costs accuracy between €1M and €1.95M (see [Luxury Routing](#luxury-routing)).
@@ -394,7 +397,7 @@ pip install pytest httpx huggingface_hub
 pytest
 ```
 
-Expected: `124 passed, 1 skipped`, offline (the UI tests mock the API; prediction logging is disabled). The skipped test runs the synthetic log generator and needs `data/`, which is not in git.
+Expected: `128 passed, 1 skipped`, offline (the UI tests mock the API; prediction logging is disabled). The skipped test runs the synthetic log generator and needs `data/`, which is not in git.
 
 - `test_app.py`: health check, valid prediction, invalid postcode (422).
 - `test_predict.py`: vocabulary mapping (aliases, idempotence, unknown and rare cities, unknown categories), real-model behaviour (house ≠ apartment, province and condition move the price, the luxury model is not constant), luxury responses without a range, 422 on unknown province, conformal margin reaching its target coverage and applied by the engine, the engine called with the required fields alone pricing like the API, a left-out build year priced at the training median.
