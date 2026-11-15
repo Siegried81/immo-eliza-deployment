@@ -114,14 +114,16 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
     # didn't give is missing (None), not 0, 1 or a year: the pipeline's median
     # imputer then fills it as it did for a training row without it. The training data has
     # every column, so these defaults only reach callers such as a direct
-    # engine.predict() with the required fields alone.
+    # engine.predict() with the required fields alone. Garage and pool stay at
+    # 0: no training row lacks them, so "not given" has no trained meaning and
+    # "none" is the reading a caller expects.
     defaults = {
         "property_state": "NORMAL",
         "build_year": None,
-        "livable_surface": 0,
+        "livable_surface": np.nan,
         "total_surface": None,
         "garage": 0,
-        "terrace": 0,
+        "terrace": np.nan,
         "swimming_pool": 0,
         "bedroom_count": None,
         "energy_consumption_kWh_m2_year": 0,
@@ -194,6 +196,11 @@ def build_locations(listings: pd.DataFrame) -> dict:
     rows): the median latitude and longitude of their listings, plus the
     postcode most listings of a city carry.
 
+    Cities are filed under their province. Nine city names exist in two
+    provinces (Halle, Deurne, Vorst, Perwez...), and one entry per name would
+    put the centroid between two towns and give one of them the other's
+    postcode.
+
     The models read a centroid and not each listing's own coordinates because a
     user gives a postcode and a city, never coordinates. Trained on exact
     coordinates, the models would be asked at inference for a precision the
@@ -203,9 +210,13 @@ def build_locations(listings: pd.DataFrame) -> dict:
         table = listings.groupby(column)[["latitude", "longitude"]].median().dropna().round(5)
         return {str(name): [lat, lon] for name, lat, lon in table.itertuples()}
 
-    usual = listings.groupby("city")["postcode"].agg(lambda codes: int(codes.mode().iloc[0]))
-    return {"postcodes": centroids("postcode"), "cities": centroids("city"),
-            "city_postcodes": usual.to_dict()}
+    cities, city_postcodes = {}, {}
+    for province, rows in listings.groupby("province"):
+        table = rows.groupby("city")[["latitude", "longitude"]].median().dropna().round(5)
+        cities[province] = {city: [lat, lon] for city, lat, lon in table.itertuples()}
+        usual = rows.groupby("city")["postcode"].agg(lambda codes: int(codes.mode().iloc[0]))
+        city_postcodes[province] = usual.to_dict()
+    return {"postcodes": centroids("postcode"), "cities": cities, "city_postcodes": city_postcodes}
 
 
 def load_locations(path: Path = LOCATIONS_PATH) -> dict:
@@ -217,7 +228,9 @@ def add_location(df: pd.DataFrame, locations: dict) -> pd.DataFrame:
     """
     Add area_latitude and area_longitude: the centroid of the postcode, or of
     the city when the training rows have no listing in that postcode, or
-    missing when they know neither (the median imputer then fills it).
+    missing when they know neither (the median imputer then fills it). The
+    city is looked up in the row's province first, then in the others, since
+    to_training_vocabulary() accepts a known city under another province.
 
     Training and inference both come through here with the same `locations`,
     so a postcode means the same place in both.
@@ -227,11 +240,17 @@ def add_location(df: pd.DataFrame, locations: dict) -> pd.DataFrame:
         df["postcode"] = None
     df["postcode"] = pd.to_numeric(df["postcode"], errors="coerce")
 
-    def centroid(postcode, city):
+    def centroid(postcode, province, city):
         found = None if pd.isna(postcode) else locations["postcodes"].get(str(int(postcode)))
-        return found or locations["cities"].get(city) or (np.nan, np.nan)
+        if not found:
+            by_province = locations["cities"]
+            found = by_province.get(province, {}).get(city) or next(
+                (cities[city] for cities in by_province.values() if city in cities), None)
+        return found or (np.nan, np.nan)
 
-    pairs = [centroid(postcode, city) for postcode, city in zip(df["postcode"], df["city"])]
+    provinces = df["province"] if "province" in df.columns else [None] * len(df)
+    pairs = [centroid(postcode, province, city)
+             for postcode, province, city in zip(df["postcode"], provinces, df["city"])]
     df["area_latitude"] = [float(lat) for lat, _ in pairs]
     df["area_longitude"] = [float(lon) for _, lon in pairs]
     return df
