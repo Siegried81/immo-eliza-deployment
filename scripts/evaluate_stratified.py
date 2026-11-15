@@ -8,6 +8,13 @@ Two modes, on two different splits of src/train.py:
   routing, for comparison) on the sealed TEST split. Nothing is chosen on it,
   so these are the figures to publish. Don't pick a threshold from them.
 
+Three readings of the bias, because they disagree. "Bias" is the mean of
+(predicted - actual) / actual. It is positive even for a model that is too
+high as often as too low, since an estimate at twice the price counts +100% and
+one at half the price -50%. "MedianBias" is the median of the same ratio: 0 when
+half the estimates are above the price. "TotalBias" compares the sum of the
+estimates with the sum of the prices.
+
 Tiers split at the luxury price threshold from models/luxury_threshold.json,
 which is what the classifier was trained to detect.
 
@@ -63,6 +70,9 @@ def main(on_test=False):
                 "MAE": f"€{np.abs(err).mean():,.0f}",
                 "MAPE": f"{np.mean(np.abs(err) / actual[mask]):.1%}",
                 "Bias": f"{np.mean(err / actual[mask]):+.1%}",
+                "MedianAPE": f"{np.median(np.abs(err) / actual[mask]):.1%}",
+                "MedianBias": f"{np.median(err / actual[mask]):+.1%}",
+                "TotalBias": f"{predicted[mask].sum() / actual[mask].sum() - 1:+.1%}",
             })
         overall = np.mean(np.abs(predicted - actual) / actual)
         label = "no routing" if threshold > 1 else f"THRESHOLD = {threshold}"

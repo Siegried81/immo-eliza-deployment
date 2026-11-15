@@ -20,8 +20,7 @@ from train import TARGET, build_preprocessor, clipped_log_target, load_dataset, 
 def prepare():
     """Preprocessed training and validation arrays, as train.py builds them."""
     df = load_dataset()
-    X = df.drop(columns=[TARGET])
-    X_train, X_val = split(X)
+    X_train, X_val = (part.drop(columns=[TARGET]) for part in split(df))
     y = clipped_log_target(df[TARGET], price_bounds(df.loc[X_train.index, TARGET]))
     y_train, y_val = y.loc[X_train.index], y.loc[X_val.index]
     preprocessor = build_preprocessor()

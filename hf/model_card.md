@@ -19,13 +19,14 @@ price of a Belgian house or apartment, as served by the API and the web app in
 
 | File | Role |
 |---|---|
-| `pipeline.joblib` | Standard price model (log price, trained on prices clipped to €69,000 to €1,948,950) |
-| `luxury_classifier.joblib` | Probability that a property is in the top 1% of prices (above €1,948,950) |
+| `pipeline.joblib` | Standard price model (log price, trained on prices clipped to €69,000 to €1,949,050) |
+| `luxury_classifier.joblib` | Probability that a property is in the top 1% of prices (above €1,949,050) |
 | `pipeline_luxury.joblib` | Price model for that top 1%, trained on 111 listings |
 | `pipeline_lower.joblib`, `pipeline_upper.joblib` | 10th and 90th percentile quantile models of the standard segment |
 | `luxury_threshold.json` | Routing threshold: at or above 0.9 the luxury model prices the property |
 | `interval_calibration.json` | Conformal margin that widens the quantile range to 80% coverage |
 | `categories.json` | The categories the models were trained on (cities, provinces, states) |
+| `locations.json` | Where each training postcode and city is (median coordinates of its listings), and each city's usual postcode |
 
 ## How to use
 
@@ -53,23 +54,23 @@ Loading needs the versions the models were pickled with:
 
 ## Evaluation
 
-All figures are on the test split of `src/train.py`: 2,362 listings that
+All figures are on the test split of `src/train.py`: 2,361 listings that
 nothing was fitted, early-stopped, tuned or chosen on. Routing at 0.9, as
 deployed:
 
 | Tier | MAPE |
 |---|---:|
-| All listings | 26.5% (22.5% without one bad row) |
-| < €1M | 26.0% (21.8% without it) |
-| €1M to €1.95M | 34.7% |
-| ≥ €1.95M (21 listings) | 46.2% |
+| All listings | 20.6% |
+| < €1M | 19.9% |
+| €1M to €1.95M | 31.1% |
+| ≥ €1.95M (21 listings) | 44.0% |
 
-The bad row is a 77 m² apartment listed at €3,048, a data error: on its own
-it adds 4 points to the MAPE. Median error: 15.0%. The standard model alone:
-26.24% MAPE (22.17% without that row), MAE €92,024, R² 0.646 (euros).
+Median error: 12.9%. The standard model alone: 20.28% MAPE, MAE €85,137,
+R² 0.676 (euros). Three listings priced under €10,000 are dropped from every
+split; one of them, at €3,048, used to sit in the test split.
 
-The 10th to 90th percentile range held the real price 80.9% of the time on
-2,344 test listings (target 80%; 73.6% before calibration). Its margin was set
+The 10th to 90th percentile range held the real price 80.4% of the time on
+2,344 test listings (target 80%; 70.8% before calibration). Its margin was set
 on a separate calibration split that no model early-stopped on.
 
 Until 2026-11-10 this card quoted a validation split (23.0%, 77.9%) that also
@@ -82,7 +83,11 @@ About 11,000 training listings, scraped once from Immovlan: asking prices, not s
 prices, at one point in time. The data itself is not redistributed here.
 
 - This is an estimation tool, not a valuation.
-- Below €1M prices are overestimated by about 7% on average.
-- Above €1.95M prices are underestimated (−43% bias with routing, −52% without).
+- Below €1M half the estimates are above the asking price and half below
+  (median bias +0.3%). They run high under €150k (median +22%) and low
+  between €500k and €1M (median −10%).
+- The location is the centroid of the postcode's training listings, or the
+  city's when the postcode has none.
+- Above €1.95M prices are underestimated (−41% bias with routing, −51% without).
 - A left-out build year is priced at the training median (1974).
 - A city outside the training vocabulary is accepted but ignored.

@@ -158,7 +158,7 @@ class TestStateEncoding:
         df = add_features(pd.DataFrame([{**HOUSE_IN_LIEGE, "property_state": spelling}]))
         assert df.loc[0, "property_state"] == "TO RENOVATE"
         assert df.loc[0, "property_state_encoded"] == 2
-        assert df.loc[0, "energy_consumption_kWh_m2_year"] == 180
+        assert df.loc[0, "energy_consumption_kWh_m2_year"] == 420
 
     def test_every_training_state_has_an_ordinal_and_an_energy(self):
         from src.features import ENERGY_MEAN_BY_STATE, STATE_MAPPING
@@ -166,6 +166,111 @@ class TestStateEncoding:
         for state in VOCABULARY["property_states"]:
             assert state in STATE_MAPPING, state
             assert state in ENERGY_MEAN_BY_STATE, state
+
+
+class TestEnergy:
+    """The models read the consumption the listing gives.
+
+    The cleaned data names the column "energy_consumption_kWh/m2/year" and the
+    code looked for "energy_consumption_kWh_m2_year", so training never saw a
+    real value: every row got the figure for its state.
+    """
+
+    def test_the_data_spelling_of_the_energy_column_is_renamed(self):
+        from src.features import RAW_COLUMN_NAMES, add_features, to_model_columns
+
+        listings = pd.DataFrame([{**HOUSE_IN_LIEGE, "energy_consumption_kWh_m2_year": 0}])
+        raw_name = next(iter(RAW_COLUMN_NAMES))
+        listings = listings.drop(columns="energy_consumption_kWh_m2_year").assign(**{raw_name: 264})
+        df = add_features(to_model_columns(listings))
+        assert df.loc[0, "energy_consumption_kWh_m2_year"] == 264
+
+    def test_listings_without_a_model_input_are_refused(self):
+        from src.features import to_model_columns
+
+        listings = pd.DataFrame([HOUSE_IN_LIEGE]).drop(columns="energy_consumption_kWh_m2_year")
+        with pytest.raises(KeyError, match="energy_consumption_kWh_m2_year"):
+            to_model_columns(listings)
+
+    @pytest.mark.parametrize("given, read", [(264, 264), (1000, 1000), (0, 260), (None, 260),
+                                             (1001, 260), (20_260_607, 260)])
+    def test_an_implausible_consumption_counts_as_not_given(self, given, read):
+        from src.features import add_features
+
+        df = add_features(pd.DataFrame([{**HOUSE_IN_LIEGE, "energy_consumption_kWh_m2_year": given}]))
+        assert df.loc[0, "energy_consumption_kWh_m2_year"] == read
+
+    def test_a_frugal_house_is_not_priced_below_an_energy_hungry_one(self):
+        frugal = engine.predict({**HOUSE_IN_LIEGE, "energy_consumption_kWh_m2_year": 100})["prediction"]
+        hungry = engine.predict({**HOUSE_IN_LIEGE, "energy_consumption_kWh_m2_year": 500})["prediction"]
+        assert frugal > hungry
+
+    def test_a_typical_consumption_does_not_read_as_a_ruin(self):
+        """250 kWh is the median listing. On the old models it sat between the
+        codes for "to restore" (220) and "to demolish" (300) and cost 16%. A
+        consumption left out is now filled with the state's median (260 for
+        NORMAL), so the two requests are nearly the same house."""
+        unknown = engine.predict({**HOUSE_IN_LIEGE, "energy_consumption_kWh_m2_year": 0})["prediction"]
+        typical = engine.predict({**HOUSE_IN_LIEGE, "energy_consumption_kWh_m2_year": 250})["prediction"]
+        assert abs(typical / unknown - 1) < 0.05
+
+
+class TestLocation:
+    """The models read where the postcode is, from centroids of the training rows."""
+
+    LISTINGS = pd.DataFrame({
+        "city": ["Liege", "Liege", "Liege", "Gent"],
+        "postcode": [4000, 4000, 4020, 9000],
+        "latitude": [50.64, 50.66, 50.60, 51.05],
+        "longitude": [5.56, 5.58, 5.60, 3.72],
+    })
+
+    def test_centroids_are_medians_of_the_listings_given(self):
+        from src.features import build_locations
+
+        locations = build_locations(self.LISTINGS)
+        assert locations["postcodes"]["4000"] == [50.65, 5.57]
+        assert locations["cities"]["Liege"] == [50.64, 5.58]
+        assert locations["city_postcodes"] == {"Liege": 4000, "Gent": 9000}
+
+    @pytest.mark.parametrize("postcode, city, expected", [
+        (4020, "Liege", (50.60, 5.60)),      # the postcode's own centroid
+        (4031, "Liege", (50.64, 5.58)),      # unknown postcode: the city's
+        (None, "Gent", (51.05, 3.72)),       # no postcode: the city's
+    ])
+    def test_postcode_first_then_city(self, postcode, city, expected):
+        from src.features import add_location, build_locations
+
+        df = add_location(pd.DataFrame([{"postcode": postcode, "city": city}]), build_locations(self.LISTINGS))
+        assert (df.loc[0, "area_latitude"], df.loc[0, "area_longitude"]) == expected
+
+    def test_an_unknown_place_is_missing_not_zero(self):
+        from src.features import add_location, build_locations
+
+        df = add_location(pd.DataFrame([{"postcode": 1234, "city": "Nowhere"}]), build_locations(self.LISTINGS))
+        assert df[["area_latitude", "area_longitude"]].isna().all(axis=None)
+
+    def test_every_listed_city_has_a_centroid_and_a_postcode(self):
+        from src.features import load_locations
+
+        locations = load_locations()
+        for province in VOCABULARY["provinces"].values():
+            for city in province["cities"]:
+                assert city in locations["cities"], city
+                assert 1000 <= locations["city_postcodes"][city] <= 9999
+
+    def test_the_postcode_changes_the_price(self):
+        """Same city, same house: Sart-Tilman (4031) and the centre (4000) are
+        not the same market. The models used to ignore the postcode."""
+        centre = engine.predict({**HOUSE_IN_LIEGE, "postcode": 4000})["prediction"]
+        other = engine.predict({**HOUSE_IN_LIEGE, "postcode": 4020})["prediction"]
+        assert centre != other
+
+    def test_a_postcode_outside_the_training_data_gets_a_note(self):
+        result = engine.predict({**HOUSE_IN_LIEGE, "postcode": 9999})
+        assert any("postcode 9999" in note for note in result["notes"])
+        assert not any("postcode" in note for note in engine.predict(HOUSE_IN_LIEGE)["notes"])
+
 
 class TestCityAliases:
     """A city typed in the other national language must reach the model."""

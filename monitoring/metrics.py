@@ -82,6 +82,11 @@ if __name__ == "__main__":
         print(f"\nBias analysis")
         bias = "underestimating" if mpe > 0 else "overestimating"
         print(f"The model is {bias} prices by {abs(mpe):.2f}% on average.")
+        # The mean above is pulled up by the cheap listings (an estimate at
+        # twice the price weighs +100%, one at half the price -50%), so the
+        # median says which way a typical estimate leans.
+        print(f"Median signed error     : {np.median(-diffs / actuals) * 100:+.2f}% (above 0: too high)")
+        print(f"Median APE              : {np.median(abs_diffs / actuals) * 100:.2f}%")
 
         print("\nPerformance by price tier")
         for label, low, high in PRICE_TIERS:

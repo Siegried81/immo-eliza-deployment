@@ -21,7 +21,7 @@ import streamlit as st
 # `streamlit run streamlit/app.py` puts only streamlit/ on sys.path (Streamlit
 # Cloud starts it this way), so add the repo root to import src.features.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from src.features import LOW_SAMPLE_CITY, STATE_MAPPING, load_vocabulary  # noqa: E402
+from src.features import LOW_SAMPLE_CITY, STATE_MAPPING, load_locations, load_vocabulary  # noqa: E402
 
 API_URL = os.getenv("API_URL", "http://localhost:8000").strip().rstrip("/")
 # Set to an empty string where the API is private to the UI (the Hugging Face
@@ -34,6 +34,10 @@ HISTORY_SIZE = 5
 
 VOCABULARY = load_vocabulary()
 PROVINCES = VOCABULARY["provinces"]
+# The postcode most training listings of each city carry: the form starts on
+# it, because the models read the postcode and a leftover 1000 would place a
+# Liège house in Brussels.
+CITY_POSTCODES = load_locations()["city_postcodes"]
 # Best condition first, using the same order as the model's state encoding.
 STATES = sorted(VOCABULARY["property_states"],
                 key=lambda s: -STATE_MAPPING.get(s, STATE_MAPPING["NORMAL"]))
@@ -128,9 +132,10 @@ def show_result(result: dict, livable_surface: int) -> None:
                    "is available for this segment.")
     for note in result.get("notes", []):
         st.info(note)
-    st.caption("Estimation tool, not a valuation. On 2,362 test listings, the average error "
-               "is about 22% below €1M (about €70k, leaving out one listing with a wrong price) and "
-               "prices are overestimated by about 6% there.")
+    st.caption("Estimation tool, not a valuation. On 2,253 test listings below €1M, half of the "
+               "estimates land within 13% of the asking price and two in three within 20%; the average "
+               "error is about 20% (about €64k). Estimates run high for listings under €150k and low "
+               "above €500k.")
 
 
 st.set_page_config(page_title="Immo Eliza · Price estimator", page_icon="🏠", layout="wide")
@@ -167,7 +172,9 @@ with inputs:
         most_listed = max(cities, key=cities.get)
         city = c2.selectbox("City *", city_names, index=city_names.index(most_listed),
                             help="Only cities present in the training data are listed.")
-        postcode = c3.number_input("Postcode *", min_value=1000, max_value=9999, value=1000, step=1)
+        postcode = c3.number_input("Postcode *", min_value=1000, max_value=9999, step=1,
+                                   value=CITY_POSTCODES.get(city, 1000), key=f"postcode-{city}",
+                                   help="Starts on the city's usual postcode. The estimate uses it.")
         if cities[city] < LOW_SAMPLE_CITY:
             st.caption(f"Only {cities[city]} listings in {city}: the estimate leans on the province.")
 

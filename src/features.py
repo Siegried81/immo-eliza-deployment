@@ -3,6 +3,7 @@ import re
 import unicodedata
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 # Reference year of the training data, not today's date: property_age is
@@ -12,6 +13,7 @@ import pandas as pd
 CURRENT_YEAR = 2026
 
 VOCABULARY_PATH = Path(__file__).resolve().parent.parent / "models" / "categories.json"
+LOCATIONS_PATH = Path(__file__).resolve().parent.parent / "models" / "locations.json"
 
 # TargetEncoder's default min_samples_leaf (the encoder in src/train.py uses
 # the defaults): a city with fewer training rows is pulled mostly towards the
@@ -21,18 +23,25 @@ LOW_SAMPLE_CITY = 20
 # Keys are spelled the way the training data and models/categories.json spell
 # the states: upper case, words separated by a SPACE. They used to carry an
 # underscore ("TO_RENOVATE"), which no row ever matched, so every multi-word
-# state fell through to NORMAL - ordinal 3 and 130 kWh - in training and at
+# state fell through to NORMAL, ordinal 3 and its energy figure, in training and at
 # inference alike. Changing the keys changes two numeric features for those
 # states, so the models have to be retrained after this (python src/train.py).
+#
+# The consumption a listing gets when it gives none: the median of the training
+# listings in the same state that do give one, rounded to 10 kWh. A property
+# with an unknown consumption is then priced like a typical one of its state,
+# which is what the form promises. The last two states have 10 listings and 1,
+# so their figures only keep the order. Recompute the table when the training
+# data changes, and retrain: the models learned these values.
 ENERGY_MEAN_BY_STATE = {
-    "NEW": 80,
-    "EXCELLENT": 90,
-    "FULLY RENOVATED": 110,
-    "UNDER CONSTRUCTION": 100,
-    "NORMAL": 130,
-    "TO RENOVATE": 180,
-    "TO RESTORE": 220,
-    "TO DEMOLISH": 300,
+    "NEW": 70,
+    "UNDER CONSTRUCTION": 70,
+    "EXCELLENT": 180,
+    "FULLY RENOVATED": 220,
+    "NORMAL": 260,
+    "TO RENOVATE": 420,
+    "TO RESTORE": 470,
+    "TO DEMOLISH": 600,
 }
 
 STATE_MAPPING = {
@@ -46,6 +55,18 @@ STATE_MAPPING = {
     "NEW": 7,
 }
 
+# Above this, an energy figure in the listings is a typing error or another
+# field altogether (the data holds a 20,260,607), not a consumption: 1.7% of the
+# values given. It is treated as not given. The Streamlit form stops at the
+# same value.
+MAX_ENERGY_KWH_M2_YEAR = 1000
+
+# Columns the cleaned data spells differently from the models' inputs. Without
+# the rename add_features() finds no energy column, creates one at 0 and fills
+# every row from ENERGY_MEAN_BY_STATE, so the models never read a real
+# consumption.
+RAW_COLUMN_NAMES = {"energy_consumption_kWh/m2/year": "energy_consumption_kWh_m2_year"}
+
 # The model's inputs, in the order the preprocessor in src/train.py takes them.
 # Declared once so training, drift monitoring and the tests read the same list.
 NUMERIC_FEATURES = [
@@ -53,12 +74,33 @@ NUMERIC_FEATURES = [
     "terrace", "swimming_pool", "energy_consumption_kWh_m2_year",
     "property_state_encoded", "property_age", "preschool_distance_m",
     "train_station_distance_m", "supermarket_distance_m",
+    "postcode", "area_latitude", "area_longitude",
 ]
 CATEGORICAL_FEATURES = ["property_type", "province", "city", "property_state"]
 
 # Drift is watched on every numeric input except property_age, which is
 # CURRENT_YEAR - build_year and would repeat build_year's PSI exactly.
 MONITORED_FEATURES = [f for f in NUMERIC_FEATURES if f != "property_age"]
+
+# Inputs add_features() derives itself; every other one has to come from the data.
+DERIVED_FEATURES = ["property_state_encoded", "property_age", "area_latitude", "area_longitude"]
+
+
+def to_model_columns(listings: pd.DataFrame) -> pd.DataFrame:
+    """
+    The cleaned listings under the column names the models use.
+
+    Raises KeyError if a model input is still absent afterwards. add_features()
+    fills an absent column with a default, which is right for one API request
+    and wrong for the training data: there it hides a misnamed column, and the
+    models train on the default without any error.
+    """
+    listings = listings.rename(columns=RAW_COLUMN_NAMES)
+    absent = [column for column in NUMERIC_FEATURES + CATEGORICAL_FEATURES
+              if column not in DERIVED_FEATURES and column not in listings.columns]
+    if absent:
+        raise KeyError(f"Listings have no column for the model inputs {absent}.")
+    return listings
 
 
 def add_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -106,10 +148,11 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
         .str.join(" ")
     )
 
-    # Energy consumption logic
+    # Energy consumption: a value that is missing, 0 or implausibly high is
+    # replaced by the figure for the property's state.
     def replace_energy(row):
         energy = row["energy_consumption_kWh_m2_year"]
-        if pd.isna(energy) or energy == 0:
+        if pd.isna(energy) or energy == 0 or energy > MAX_ENERGY_KWH_M2_YEAR:
             return ENERGY_MEAN_BY_STATE.get(
                 row["property_state"],
                 ENERGY_MEAN_BY_STATE["NORMAL"]
@@ -142,6 +185,55 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
         .astype(int)
     )
 
+    return df
+
+
+def build_locations(listings: pd.DataFrame) -> dict:
+    """
+    Where each postcode and each city is, from the listings given (the training
+    rows): the median latitude and longitude of their listings, plus the
+    postcode most listings of a city carry.
+
+    The models read a centroid and not each listing's own coordinates because a
+    user gives a postcode and a city, never coordinates. Trained on exact
+    coordinates, the models would be asked at inference for a precision the
+    request cannot have.
+    """
+    def centroids(column):
+        table = listings.groupby(column)[["latitude", "longitude"]].median().dropna().round(5)
+        return {str(name): [lat, lon] for name, lat, lon in table.itertuples()}
+
+    usual = listings.groupby("city")["postcode"].agg(lambda codes: int(codes.mode().iloc[0]))
+    return {"postcodes": centroids("postcode"), "cities": centroids("city"),
+            "city_postcodes": usual.to_dict()}
+
+
+def load_locations(path: Path = LOCATIONS_PATH) -> dict:
+    """The centroids src/train.py saved next to the models fitted on them."""
+    return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def add_location(df: pd.DataFrame, locations: dict) -> pd.DataFrame:
+    """
+    Add area_latitude and area_longitude: the centroid of the postcode, or of
+    the city when the training rows have no listing in that postcode, or
+    missing when they know neither (the median imputer then fills it).
+
+    Training and inference both come through here with the same `locations`,
+    so a postcode means the same place in both.
+    """
+    df = df.copy()
+    if "postcode" not in df.columns:
+        df["postcode"] = None
+    df["postcode"] = pd.to_numeric(df["postcode"], errors="coerce")
+
+    def centroid(postcode, city):
+        found = None if pd.isna(postcode) else locations["postcodes"].get(str(int(postcode)))
+        return found or locations["cities"].get(city) or (np.nan, np.nan)
+
+    pairs = [centroid(postcode, city) for postcode, city in zip(df["postcode"], df["city"])]
+    df["area_latitude"] = [float(lat) for lat, _ in pairs]
+    df["area_longitude"] = [float(lon) for _, lon in pairs]
     return df
 
 

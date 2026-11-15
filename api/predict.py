@@ -9,8 +9,8 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 MODEL_DIR = BASE_DIR / "models"
 sys.path.append(str(BASE_DIR / "src"))
 
-from src.features import (CATEGORICAL_FEATURES, NUMERIC_FEATURES, add_features,
-                          load_vocabulary, to_training_vocabulary)
+from src.features import (CATEGORICAL_FEATURES, NUMERIC_FEATURES, add_features, add_location,
+                          load_locations, load_vocabulary, to_training_vocabulary)
 
 THRESHOLD_PATH = MODEL_DIR / "luxury_threshold.json"
 
@@ -55,7 +55,7 @@ def route(result: dict, threshold: float) -> dict:
 
 
 class PredictEngine:
-    """Loads the five model artifacts once and serves single-property predictions."""
+    """Loads the five models and their lookups once and serves single-property predictions."""
 
     def __init__(self):
         self.pipeline = joblib.load(MODEL_DIR / "pipeline.joblib")
@@ -65,6 +65,7 @@ class PredictEngine:
         self.pipeline_upper = joblib.load(MODEL_DIR / "pipeline_upper.joblib")
         self.interval_margin = load_interval_margin()
         self.vocabulary = load_vocabulary()
+        self.locations = load_locations()
 
     def predict(self, data: dict):
         """
@@ -80,7 +81,11 @@ class PredictEngine:
         # so add_features and the pipeline's median imputer treat it as missing.
         df = df.apply(lambda col: pd.to_numeric(col) if col.isna().all() else col)
 
-        df = add_features(df)
+        df = add_location(add_features(df), self.locations)
+        postcode = df.loc[0, "postcode"]
+        if pd.notna(postcode) and str(int(postcode)) not in self.locations["postcodes"]:
+            notes.append(f"No training listing in postcode {int(postcode)}, so the location "
+                         "is the city's, not the postcode's.")
         # The row the models read, JSON-safe (NaN -> None), for the drift log.
         features = json.loads(df[NUMERIC_FEATURES + CATEGORICAL_FEATURES]
                               .to_json(orient="records"))[0]
