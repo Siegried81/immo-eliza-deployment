@@ -59,7 +59,9 @@ class PropertyInput(BaseModel):
     garden_m2: int = Field(0, ge=0, description="Accepted for backward compatibility; the models do not use it.")
     terrace: int = Field(0, ge=0, description="Treated as yes/no: any value above 0 means a terrace.")
     swimming_pool: bool = False
-    energy_consumption_kWh_m2_year: int = Field(0, ge=0)
+    energy_consumption_kWh_m2_year: int = Field(
+        0, ge=0, description="kWh/m2/year. 0, or a value above 1000, is read as unknown: "
+                             "the typical figure for the property state is used.")
     preschool_distance_m: Optional[int] = Field(None, ge=0)
     train_station_distance_m: Optional[int] = Field(None, ge=0)
     supermarket_distance_m: Optional[int] = Field(None, ge=0)

@@ -56,6 +56,7 @@ models/*
 !models/luxury_classifier.joblib
 !models/luxury_threshold.json
 !models/categories.json
+!models/locations.json
 !models/interval_calibration.json
 !models/pipeline_lower.joblib
 !models/pipeline_upper.joblib 

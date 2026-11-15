@@ -11,7 +11,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
-from features import CATEGORICAL_FEATURES, NUMERIC_FEATURES, add_features
+from features import (CATEGORICAL_FEATURES, LOCATIONS_PATH, NUMERIC_FEATURES, add_features,
+                      add_location, build_locations, to_model_columns)
 
 # Paths & Constants
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -24,6 +25,12 @@ LUXURY_THRESHOLD_PATH = MODEL_DIR / "luxury_threshold.json"
 PIPELINE_LOWER_PATH = MODEL_DIR / "pipeline_lower.joblib"
 PIPELINE_UPPER_PATH = MODEL_DIR / "pipeline_upper.joblib"
 TARGET = "price"
+
+# Below this an asking price is not the price of a home: the data holds a
+# 209 m² house at €2,500, another at €5,000 and a flat at €3,048, then nothing
+# until €19,900. Those rows are dropped from every split, training included.
+# The bound is set on the price alone, never on how wrong a model is on a row.
+MIN_PLAUSIBLE_PRICE = 10_000
 
 # Chosen on the old validation split (scripts/evaluate_stratified.py,
 # 2026-10-11) and checked, not re-tuned, on the new one: it holds 19 luxury
@@ -57,8 +64,13 @@ INTERVAL_CALIBRATION_PATH = MODEL_DIR / "interval_calibration.json"
 
 
 def load_dataset(path=DATA_PATH):
-    """The cleaned listings with every engineered feature, as training sees them."""
-    return add_features(pd.read_json(path))
+    """
+    The cleaned listings with every engineered feature, as training sees them.
+    The postcode and city centroids come from the training rows alone, so the
+    other splits get the location a new request would get.
+    """
+    listings = add_features(to_model_columns(pd.read_json(path)))
+    return add_location(listings, build_locations(split_all(listings)[0]))
 
 
 def split_all(frame):
@@ -66,6 +78,10 @@ def split_all(frame):
     (train, validation, calibration, test), the four splits described at the
     top of this file. Each one is a slice of `frame`, so its index points back
     to the original rows.
+
+    Rows priced under MIN_PLAUSIBLE_PRICE are dropped after the draw, not
+    before: every other row then stays in the split it was in, and no row that
+    served early stopping or tuning can move into the test split.
     """
     n = len(frame)
     legacy_train, _ = train_test_split(frame, test_size=LEGACY_VALIDATION_SIZE,
@@ -77,7 +93,8 @@ def split_all(frame):
                                          random_state=SPLIT_SEED)
     train, validation = train_test_split(rest, test_size=round(n * VALIDATION_SIZE),
                                          random_state=SPLIT_SEED)
-    return train, validation, calibration, test
+    return tuple(part[part[TARGET] >= MIN_PLAUSIBLE_PRICE]
+                 for part in (train, validation, calibration, test))
 
 
 def split(frame):
@@ -170,8 +187,7 @@ def train():
     4. Persists all models and configuration thresholds to disk.
     """
     df = load_dataset()
-    X = df.drop(columns=[TARGET])
-    X_train, X_val, X_calib, X_test = split_all(X)
+    X_train, X_val, X_calib, X_test = (part.drop(columns=[TARGET]) for part in split_all(df))
     bounds = price_bounds(df.loc[X_train.index, TARGET])
     y = clipped_log_target(df[TARGET], bounds)
     y_train, y_val = y.loc[X_train.index], y.loc[X_val.index]
@@ -180,14 +196,16 @@ def train():
     X_val_p = preprocessor.transform(X_val)
 
     # Standard regressor, with the parameters src/optimize.py found on the
-    # train and validation splits (2026-11-10, seeded search, 50 trials).
+    # train and validation splits (seeded search, 50 trials). Re-run it when
+    # the features change: these were found with the energy consumption and
+    # the location read.
     model = XGBRegressor(
-        n_estimators=714,
-        learning_rate=0.08075316093557,
-        max_depth=8,
-        reg_lambda=6.337637256217289,
-        subsample=0.8078618752326912,
-        colsample_bytree=0.517705564570911,
+        n_estimators=1299,
+        learning_rate=0.04731190449779259,
+        max_depth=7,
+        reg_lambda=4.009998057635267,
+        subsample=0.6532795510727687,
+        colsample_bytree=0.7076672341175785,
         objective="reg:absoluteerror",
         random_state=42,
         early_stopping_rounds=50
@@ -196,6 +214,9 @@ def train():
 
     os.makedirs(MODEL_DIR, exist_ok=True)
     joblib.dump(Pipeline([("preprocessor", preprocessor), ("model", model)]), PIPELINE_PATH)
+    # The centroids the models were fitted on; the API reads them to place a request.
+    LOCATIONS_PATH.write_text(json.dumps(build_locations(df.loc[X_train.index]), ensure_ascii=False, indent=1),
+                              encoding="utf-8")
 
     # Prediction Interval (Quantile Regression) 
     lower_model = quantile_regressor(QUANTILE_LOWER)

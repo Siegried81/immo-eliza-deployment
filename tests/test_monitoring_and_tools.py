@@ -176,7 +176,7 @@ class TestSharedTrainingHelpers:
         assert set(NUMERIC_FEATURES) - set(MONITORED_FEATURES) == {"property_age"}
 
     def test_the_four_splits_are_disjoint_and_cover_every_row(self):
-        X = pd.DataFrame({"a": range(2000)})
+        X = pd.DataFrame({"price": range(100_000, 102_000)})
         parts = split_all(X)
         indexes = [set(part.index) for part in parts]
         assert sum(len(i) for i in indexes) == len(X)
@@ -185,13 +185,21 @@ class TestSharedTrainingHelpers:
 
     def test_no_test_row_was_in_the_old_validation_split(self):
         # The old 20% picked the threshold and scored the October search.
-        X = pd.DataFrame({"a": range(2000)})
+        X = pd.DataFrame({"price": range(100_000, 102_000)})
         _, old_validation = train_test_split(X, test_size=LEGACY_VALIDATION_SIZE,
                                              random_state=SPLIT_SEED)
         assert not set(split_all(X)[3].index) & set(old_validation.index)
 
+    def test_implausible_prices_leave_without_moving_any_other_row(self):
+        from train import MIN_PLAUSIBLE_PRICE
+        clean = pd.DataFrame({"price": [100_000] * 2000})
+        dirty = clean.copy()
+        dirty.loc[[3, 700, 1500], "price"] = [2_500, 3_048, MIN_PLAUSIBLE_PRICE - 1]
+        for before, after in zip(split_all(clean), split_all(dirty)):
+            assert list(after.index) == [i for i in before.index if i not in (3, 700, 1500)]
+
     def test_split_returns_train_and_validation_only(self):
-        X = pd.DataFrame({"a": range(2000)})
+        X = pd.DataFrame({"price": range(100_000, 102_000)})
         train, validation, _, _ = split_all(X)
         new_train, new_val = split(X)
         assert new_train.index.equals(train.index) and new_val.index.equals(validation.index)

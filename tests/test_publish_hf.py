@@ -13,7 +13,7 @@ import publish_hf  # noqa: E402
 
 RUNTIME_MODELS = {"pipeline.joblib", "pipeline_luxury.joblib", "luxury_classifier.joblib",
                   "pipeline_lower.joblib", "pipeline_upper.joblib", "luxury_threshold.json",
-                  "interval_calibration.json", "categories.json"}
+                  "interval_calibration.json", "categories.json", "locations.json"}
 
 
 class RecordingApi:
@@ -66,7 +66,7 @@ def test_dry_run_uploads_nothing(monkeypatch, capsys):
         raise AssertionError("a dry run must not push")
     monkeypatch.setattr(publish_hf, "push", no_push)
     assert publish_hf.main(["model"]) == 0
-    assert "Dry run: 9 files" in capsys.readouterr().out
+    assert "Dry run: 10 files" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("target,repo_type", [("space", "space"), ("model", "model")])

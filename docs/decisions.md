@@ -229,3 +229,155 @@ committed models were not replaced: the published figures are theirs.
 - **Revisit if:** a threshold or any other setting gets chosen by looking at
   `evaluate_stratified.py --test`. Then the test split is spent and needs a
   new draw or new data.
+
+## 2026-11-15: the models read the real energy consumption
+
+- **What:** `src/features.py::to_model_columns()` renames the data's
+  `energy_consumption_kWh/m2/year` to `energy_consumption_kWh_m2_year`, the
+  name the code reads, and raises if a model input has no column.
+  `load_dataset()` calls it. In `add_features()` a consumption of 0 or above
+  `MAX_ENERGY_KWH_M2_YEAR` (1,000) counts as not given, like a missing one,
+  and gets the figure for the property's state.
+- **Why:** the two names never matched, so `add_features()` created the column
+  at 0 and filled every training row from `ENERGY_MEAN_BY_STATE`. 12,841 of
+  15,746 listings give a consumption (median 264 kWh) and no model ever read
+  one. The feature was a second copy of the state, on a scale of 80 to 300.
+  At inference the user's real figure went into that scale. Measured on the
+  previous models, a 150 m² Liège house in normal state: €220,580 with the
+  field left out, €184,617 with 250 kWh (−16%), €281,964 with 60 kWh (+28%).
+  Same class of bug as the state keys of 2026-10-10: a spelling that matches
+  nothing and falls back without an error.
+- **The 1,000 kWh cap:** 218 values are above it (1.7% of those given), up to
+  20,260,607, which is a date. 56 are 0. The Streamlit form already stops at
+  1,000. An API request above 1,000 used to go to the models as it was; it now
+  counts as not given.
+- **The state table is rebuilt from the data.** `ENERGY_MEAN_BY_STATE` said
+  130 kWh for a normal state; the training listings in that state that give a
+  consumption have a median of 260. The table now holds those medians, rounded
+  to 10 (70 new, 180 excellent, 220 fully renovated, 260 normal, 420 to
+  renovate; 470 and 600 for "to restore" and "to demolish", which have 10
+  listings and 1 and only keep the order). With the old table a consumption
+  left out priced the house like a frugal one: €270,443 against €244,762 with
+  250 kWh, on the same Liège house. With the new one, €241,607 and €242,315.
+  In cross-validation the two tables score the same (21.26% and 21.27% below
+  €1M), so this changes what "unknown" means, not the accuracy.
+- **Proved before, measured after:** 5-fold cross-validation on the train and
+  validation rows (the test split not read), below €1M: MAPE 22.08% with the
+  column unread, 21.26% with it read and capped; median error 15.05% to
+  14.33%. Retrained with this fix alone, the test split gave 26.0% as deployed
+  (was 26.5%) and 21.3% below €1M without the €3,048 row (was 21.8%).
+- **Revisit if:** the cleaning step renames its columns, which
+  `to_model_columns()` now refuses instead of training on a default; or the
+  training data changes, since the table is computed from it by hand.
+
+## 2026-11-15: the models read the postcode
+
+- **What:** three inputs are added to `NUMERIC_FEATURES`: `postcode`,
+  `area_latitude` and `area_longitude`. The last two are the median
+  coordinates of the training listings in the request's postcode, or in its
+  city when the training rows have none there, or missing when they know
+  neither (`src/features.py::add_location`). `src/train.py` writes the
+  centroids to `models/locations.json` (937 postcodes, 1,533 cities) and the
+  API reads them. The file also holds each city's most common postcode, which
+  the Streamlit form now starts on instead of 1000.
+- **Why:** `postcode` was required by the API and the form, and no model read
+  it. The city reached the models as one target-encoded number, so they knew a
+  city's price level and nothing of where it is.
+- **Why centroids and not each listing's coordinates:** a request has a
+  postcode and a city, never coordinates. In cross-validation the postcode
+  centroid does as well as the exact coordinates (20.68% below €1M for both,
+  21.66% without location), and training on it means a postcode is the same
+  place at training and at inference.
+- **What changes in the numbers:** every price. The same Liège house is
+  €241,607 in postcode 4000 and €229,781 in 4020. About 1% of the test
+  listings carry a postcode the training rows don't have; they get the city's
+  centroid and the response says so. Drift is now watched on 15 features.
+- **Revisit if:** the UI lets a user pick a city and keep another city's
+  postcode. The postcode wins, which is right when it is right.
+
+## 2026-11-15: asking prices under €10,000 are dropped, from every split
+
+- **What:** `src/train.py::MIN_PLAUSIBLE_PRICE = 10_000`. `split_all()` drops
+  the rows below it after drawing the splits. Three rows go: a 209 m² house
+  in Arlon at €2,500 and a house in Boncelles at €5,000 (both training rows),
+  and the 77 m² Oostende apartment at €3,048 (test row 5258). The next price
+  up is €19,900. Train is 11,020 rows (was 11,022), test 2,361 (was 2,362).
+- **This reverses part of the 2026-11-10 entry**, which kept row 5258 in the
+  test split and said the split would need a new draw once the cleaning
+  dropped it. What that entry refused was removing a row because it hurt the
+  score. This rule reads the price alone and applies to training rows too.
+  And no new draw is needed: the rows are dropped after the draw, so every
+  other row stays in its split and no row that served early stopping or
+  tuning can move into the test split. A filter before the draw would
+  reshuffle all of them.
+- **What is not clean about it:** the rule was written because of a row seen
+  in the test split. The bound was then set from the price distribution of
+  all listings (three rows under €10,000, a gap up to €19,900), not from any
+  model's error. Published figures no longer carry a "without one bad row"
+  variant; the comparison below gives both.
+- **Revisit if:** the upstream cleaning starts dropping these rows itself.
+  Then the constant does nothing and can go.
+
+## 2026-11-15: the figures after the three changes above
+
+`src/optimize.py` was re-run on the final features (50 seeded trials,
+validation log-MAE 0.2050 → 0.1890; parameters in `train.py`) and all five
+models retrained in the python:3.12 Linux image with the pinned versions. The
+clip bounds are €69,000 to €1,949,050 (was €1,948,950), still 111 luxury
+training rows. The 0.9 threshold is kept, checked on validation as before:
+it cuts the top tier's MAPE from 50.5% to 40.8% and costs 0.2 point below €1M.
+
+| Figure (test split) | Before (2,362 rows) | After (2,361 rows) |
+|---|---:|---:|
+| Standard model MAPE | 26.24% (22.17% without row 5258) | 20.28% |
+| Standard model median APE | 14.85% | 12.88% |
+| Standard model MAE | €92,024 | €85,137 |
+| Standard model R² (euros) | 0.646 | 0.676 |
+| Standard model mean bias | +7.88% (+3.79%) | +3.44% |
+| As deployed (0.9), overall MAPE | 26.5% (22.5%) | 20.6% |
+| As deployed, < €1M MAPE | 26.0% (21.8%) | 19.9% |
+| As deployed, < €1M MAE | €69,601 | €64,259 |
+| As deployed, €1M to €1.95M MAPE | 34.7% | 31.1% |
+| As deployed, top tier MAPE | 46.2% | 44.0% |
+| As deployed, R² (euros) | 0.617 | 0.640 |
+| Range coverage, raw to calibrated | 73.6% → 80.9% (2,344 rows) | 70.8% → 80.4% (2,344 rows) |
+| Range median width | ≈ €213k | ≈ €192k |
+
+Of the 5.9 points of overall MAPE, 4 are the €3,048 row leaving and about 2
+are the models (22.5% → 20.6% on the same rows).
+
+The test split was read three times today, after the energy fix, after the
+postcode and the price rule, and after the state table. Each change was
+chosen on train and validation first, and none was kept or dropped for its
+test score: the state table reads 0.2 point worse on the test (20.4% → 20.6%)
+and was kept for what it means. Three readings is still more than one, so the
+figures are a little less sealed than on 2026-11-10.
+
+Measured and not done: leaving missing values to XGBoost, an "unknown" state
+category and a count of missing fields each moved the cross-validated error
+below €1M by 0.2 point at most (21.66% → 21.42% at best), and none changed
+the error on listings under €150k.
+
+## 2026-11-15: "overestimated by 6%" is replaced by the median and the price bands
+
+- **What:** the UI caption, the README limitations and the model card no
+  longer say that prices below €1M are overestimated by about 6%. They give
+  the median error and say where estimates run high and where they run low.
+  `scripts/evaluate_stratified.py` prints three readings per tier (mean bias,
+  median bias, total bias) and `monitoring/metrics.py` prints the median
+  signed error. The mean bias is still computed and still published, under
+  the name "mean bias".
+- **Why:** the +6% was the mean of (estimate − price) / price. That mean is
+  positive for a model that is too high as often as too low: twice the price
+  weighs +100%, half the price −50%. On the test split below €1M, as deployed,
+  the mean is +5.1%, the median +0.3%, and the sum of the estimates is 1.6%
+  under the sum of the prices. By price band the median bias is +22.4% under
+  €150k (257 rows, 82% estimated above their price), +4.3% from €150k to
+  €250k, −1.4% from €250k to €500k and −9.8% from €500k to €1M. A reader with
+  a €400k house was told the estimate ran 6% high when it runs slightly low.
+- **What changes in the numbers:** none of the models' outputs. The sentence
+  users read changes meaning: from one average to a median and a direction per
+  price band.
+- **Still true after today's fixes:** the pull towards the middle of the
+  market. Listings under €150k are estimated 22% too high at the median.
+  Nothing in the inputs tells a ruin or a share from a house.

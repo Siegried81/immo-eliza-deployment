@@ -75,10 +75,16 @@ and the encoder:
 `models/categories.json` is read by both the API (to validate) and the UI (to
 build its choice lists), so the UI can only offer values the model knows.
 
-`add_features()` is the other shared function: imputed energy by state, total
+`add_features()` is the other shared function: energy consumption (the figure
+for the property's state, the median of the training listings in that state,
+when it is missing, 0 or above 1,000 kWh), total
 surface defaulting to 1.2 × livable surface, `property_age`,
 `property_state_encoded`. Train and inference call the same code, so they
-cannot drift apart. The state dictionaries are keyed with spaces
+cannot drift apart. `add_location()` follows the same rule for the place: it
+adds the median coordinates of the postcode's training listings (the city's
+when the postcode has none), read from `models/locations.json`. The models
+are trained on those centroids and not on each listing's own coordinates,
+because a request carries a postcode and a city, never coordinates. The state dictionaries are keyed with spaces
 (`"TO RENOVATE"`), the way the data spells them; see `docs/decisions.md`,
 2026-10-10, for why that changed the numbers.
 
@@ -94,16 +100,16 @@ surface or distances, which moved a typical Liège house by about +14%
 - **Data:** `data/clean/cleaned_data.json`, 15,746 listings scraped from
   Immovlan. It is git-ignored, so a fresh clone cannot retrain.
 - **Split:** four disjoint parts from `split_all()`, `SPLIT_SEED = 42`. Train
-  11,022 rows (fits everything), validation 1,575 (early stopping, the Optuna
+  11,020 rows (fits everything), validation 1,575 (early stopping, the Optuna
   search, checking the routing threshold), calibration 787 (the range's margin
-  only), test 2,362 (sealed: only the final figures read it). The test rows
+  only), test 2,361 (sealed: only the final figures read it). The test rows
   come from the old 80% training split, so the October threshold choice and
   search never scored them (a fresh 15% with the same seed would have sat
   inside the old 20% validation split). Every script imports these helpers,
   so they all see the same rows.
 - **Target:** `log1p(price)`, clipped to the 1st to 99th percentile for the
   standard and quantile models, the percentiles taken on the training rows
-  only (`price_bounds`). The clip caps the standard model at about €1.95M (€1,948,950),
+  only (`price_bounds`). The clip caps the standard model at about €1.95M (€1,949,050),
   which is why the luxury path exists.
 - **Missing build year:** stays missing in `add_features()`, like at the API,
   and the median imputer fills it with the training median (1974). It used to
@@ -131,29 +137,26 @@ split (`scripts/evaluate_stratified.py --test`, README "Luxury Routing"):
 
 | Routing | Overall MAPE | < €1M | €1M to €1.95M | ≥ €1.95M (21 rows) |
 |---|---:|---:|---:|---:|
-| None | 26.2% | 25.9% | 28.1% | 51.6% |
-| **0.9 (deployed)** | **26.5%** | **26.0%** | **34.7%** | **46.2%** |
-
-The first two columns carry one €3,048 listing, a data error worth 4 points
-of MAPE on its own (section 6).
+| None | 20.3% | 19.8% | 26.2% | 50.6% |
+| **0.9 (deployed)** | **20.6%** | **19.9%** | **31.1%** | **44.0%** |
 
 What a reader has to know:
 
 - **Routing is kept for the top tier, not for the average.** It costs 0.3 point
-  of overall MAPE and 7 points on the €1M to €1.95M tier, and it cuts the luxury
-  bias from −51.6% to −43.0%.
+  of overall MAPE and 5 points on the €1M to €1.95M tier, and it cuts the luxury
+  bias from −50.6% to −41.3%.
 - **0.9 is kept, not proven best.** It was picked on the old validation split
   and only checked on the new one, which has 19 luxury rows. There it cuts the
-  luxury MAPE from 51.2% to 44.0%. With 21 luxury rows in the test split, one
+  luxury MAPE from 50.5% to 40.8%. With 21 luxury rows in the test split, one
   property moves the tier's MAPE by about 5 points.
 - **The switch is hard.** A property just under and just over the threshold can
   get prices €1M apart. The obvious fixes were measured and rejected
   (`scripts/evaluate_routing_blend.py`, validation split): a log-space blend
-  weighted by the raw probability helps the €1.95M+ tier (44.0% → 32.4% MAPE)
-  but pushes the < €1M bias from +7.9% to +20.3%, because that probability is
+  weighted by the raw probability helps the €1.95M+ tier (40.8% → 26.9% MAPE)
+  but pushes the < €1M mean bias from +7.2% to +16.0%, because that probability is
   inflated by `scale_pos_weight`; weighted by an isotonic-calibrated
-  probability it helps both upper tiers (30.7% → 24.6%, 44.0% → 39.5%) and
-  costs the < €1M tier (23.0% → 23.6%). That's on 52 rows between €1M and
+  probability it helps both upper tiers (28.1% → 25.2%, 40.8% → 35.6%) and
+  costs the < €1M tier (20.6% → 21.1%). That's on 52 rows between €1M and
   €1.95M and 19 above, too few to switch.
 
 ---
@@ -161,7 +164,7 @@ What a reader has to know:
 ## 5. The price range
 
 The standard segment returns a 10th to 90th percentile range from two quantile
-models. On the test split the raw models hold the real price 73.6% of the
+models. On the test split the raw models hold the real price 70.8% of the
 time, not 80% (README, bug #10).
 
 `train.py` applies **conformalized quantile regression** (CQR):
@@ -184,12 +187,12 @@ From `models/interval_calibration.json`:
 | | Value |
 |---|---:|
 | Calibration rows / test rows | 781 / 2,344 |
-| Log margin | +0.0483 (bounds × / ÷ 1.049) |
-| Coverage on the test split, raw | 73.6% |
-| Coverage on the test split, calibrated | 80.9% |
+| Log margin | +0.0542 (bounds × / ÷ 1.056) |
+| Coverage on the test split, raw | 70.8% |
+| Coverage on the test split, calibrated | 80.4% |
 
 Over 200 random re-draws of the calibration and test rows (same models), the
-coverage averages 80.1% (76.2% to 84.7%). No range is returned for the luxury
+coverage averages 80.2% (73.4% to 84.1%). No range is returned for the luxury
 segment: the quantile models describe the standard model's estimate, and 111
 rows are too few for a stable quantile fit.
 
@@ -197,7 +200,7 @@ rows are too few for a stable quantile fit.
 
 ## 6. Evaluation: what the numbers mean
 
-All model figures are on the 2,362-row test split, which nothing was fitted,
+All model figures are on the 2,361-row test split, which nothing was fitted,
 early-stopped, tuned or chosen on. The validation split did all of that, so
 its scores are optimistic and never published as a headline (README, bug #13).
 An earlier "holdout" (rows absent from `data/training_baseline.csv`) was worse:
@@ -205,21 +208,34 @@ it still contained 3,938 of its 4,944 rows from the training split, which made
 MAPE look like 16.8% instead of 22.4% on the old validation split (README,
 bug #8).
 
-Standard model alone (`monitoring/metrics.py`): MAE €92,024, MAPE 26.24%,
-median APE 14.85%, R² 0.646 (euros), bias +7.88%. By tier, MAPE is 25.94%
-below €1M, 28.13% between €1M and €1.95M, and 51.59% above €1.95M.
+Standard model alone (`monitoring/metrics.py`): MAE €85,137, MAPE 20.28%,
+median APE 12.88%, R² 0.676 (euros), mean bias +3.44%, median bias −0.37%.
+By tier, MAPE is 19.77% below €1M, 26.20% between €1M and €1.95M, and 50.60%
+above €1.95M.
 
-One test row is a data error: a 77 m² Oostende apartment at €3,048, priced
-€297,380 by the model. That's a 9,657% error, and on its own it adds 4 points
-to the MAPE (22.17% without it) and 4 points to the bias (+3.79% without it).
-It stays in: removing a row after seeing the score is a choice made on the
-test split. The cleaning step should drop prices like that, and the next
-retraining will need a new test split once it does.
+Three listings are priced under €10,000 and are dropped from every split
+(`MIN_PLAUSIBLE_PRICE` in `src/train.py`): two were training rows, one was a
+77 m² Oostende apartment at €3,048 in the test split, a 9,430% error worth 4
+points of MAPE. It could not be removed for hurting the score, which is a
+choice made on the test split. It can be removed by a rule that reads the
+price alone and applies everywhere. `split_all()` drops the rows after the
+draw, so every other row keeps its split and the test split needs no new draw.
 
 MAPE is the headline because a buyer thinks in percent of the price, but it
 weights a €150k flat and a €3M villa equally. That is why every table is
 split by price tier, and why the routing decision is read off the top tier's
 bias rather than the overall MAPE.
+
+The mean bias and the median bias answer different questions. The mean of
+(estimate − price) / price is positive for a model that is too high as often
+as too low, because an estimate at twice the price weighs +100% and one at
+half the price −50%. Below €1M, as deployed, the mean is +5.1% and the median
++0.3%. The mean comes from the 257 test listings under €150k (82% of them
+estimated above their price, median +22%); between €500k and €1M the
+estimates run low (median −10%). The model pulls prices towards
+the middle of the market, and "overestimated by 6%" described no typical
+listing. `evaluate_stratified.py` prints the mean, median and total bias per
+tier; the README has the table by price band.
 
 ---
 
@@ -252,7 +268,7 @@ bias rather than the overall MAPE.
   error in `/predict` is logged with its traceback and answered with a generic
   500, never the exception text. `build_year` is bounded by today's date, not
   by a year written into the schema.
-- **Tests:** 106, offline, run by `.github/workflows/tests.yml` on every push
+- **Tests:** 125, offline, run by `.github/workflows/tests.yml` on every push
   and pull request. They cover the vocabulary mapping, the real model's
   behaviour (house ≠ apartment, province and condition move the price, the
   luxury model is not constant), the conformal margin, the API contract and
@@ -292,10 +308,10 @@ These are found by reading the code. Each one is its own change.
   `python src/train.py` run in that image reproduces them. The 2026-11-10
   models were trained in python:3.12 with the pinned versions.
 - **Two scripts, two sets of figures.** `monitoring/metrics.py` scores the
-  standard model alone (26.24% MAPE overall); `scripts/evaluate_stratified.py
-  --test` scores what the API serves, routing included (26.5% overall). Below
-  €1M they nearly agree on the test split (€68,579 and €69,601 MAE), because
-  0.9 routes one of those 2,254 rows. The UI caption and the
+  standard model alone (20.28% MAPE overall); `scripts/evaluate_stratified.py
+  --test` scores what the API serves, routing included (20.6% overall). Below
+  €1M they nearly agree on the test split (€62,512 and €64,259 MAE), because
+  0.9 routes two of those 2,253 rows. The UI caption and the
   README's limitations quote the second; the README's performance table quotes
   the first. Both are right, as long as each figure says which one it is.
 - **Luxury rows are few.** 111 rows to fit a regressor and 21 to judge it:
@@ -321,10 +337,10 @@ LLM call could add value, with schema validation and a fallback:
 ### Strategy and business
 
 - **What it is for:** a first estimate for a buyer or a seller, not a
-  valuation. About 22% average error below €1M (≈ €70k as deployed, without the one bad test row) is useful to sort
+  valuation. About 20% average error below €1M (≈ €64k as deployed) is useful to sort
   listings, not to set a price; the app says so next to every estimate.
 - **Where it is weakest is where the money is.** Above €1.95M the error is
-  close to half the price (46.2% on the test split), mostly underestimation.
+  close to half the price (44.0% on the test split), mostly underestimation.
 - **The data ages.** One scrape, no refresh pipeline, and no real traffic has
   been logged durably yet (see above). A product version needs a
   scheduled re-scrape, retraining on a fixed cadence, and the same tier tables
