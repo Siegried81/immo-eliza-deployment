@@ -205,7 +205,7 @@ accounts (the Hub answered 402 to the creation request on 2026-10-25).
 docker compose up --build
 ```
 
-App available at `http://localhost:8508`, API at `http://localhost:8003/docs`.
+App available at `http://localhost:8508`, API at `http://localhost:8008/docs`.
 
 ### Method 2: Pre-built images from Docker Hub
 
@@ -213,7 +213,7 @@ No build and no clone needed. The images are `siegried/immo-eliza-api` and
 `siegried/immo-eliza-ui`, run as containers `api` and `ui` on a network named
 `immo`. The exact commands are in [DOCKERHUB.md](DOCKERHUB.md#how-to-use-this-image).
 
-Methods 1 and 2 publish the same ports, 8003 and 8508, so only one stack can run at a time.
+Methods 1 and 2 publish the same ports, 8008 and 8508, so only one stack can run at a time.
 Stop the other first: `docker compose down` before Method 2, or
 `docker rm -f api ui` before Method 1.
 
@@ -223,8 +223,8 @@ Python 3.12 recommended (the pinned scikit-learn needs ≥ 3.11).
 
 ```bash
 pip install -r requirements.txt
-uvicorn api.app:app --host 0.0.0.0 --port 8003                                 # terminal 1
-API_URL=http://localhost:8003 streamlit run streamlit/app.py --server.port 8508 # terminal 2
+uvicorn api.app:app --host 0.0.0.0 --port 8008                                 # terminal 1
+API_URL=http://localhost:8008 streamlit run streamlit/app.py --server.port 8508 # terminal 2
 ```
 
 ### Method 4: Retrain & re-evaluate
