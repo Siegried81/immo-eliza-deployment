@@ -1,6 +1,7 @@
-# Local stack: API on http://localhost:8003, UI on http://localhost:8508.
-# Host ports 8508/8003, not 8501/8000: the other local stacks already publish
-# 8501-8507 and 8000-8002, so all of them can run side by side.
+# Local stack: API on http://localhost:8008, UI on http://localhost:8508.
+# Host ports follow one rule across the local stacks: project N publishes its UI
+# on 850N and its API on 800N. This is project 8, so 8508 and 8008, and every
+# stack can run side by side.
 # No source volumes: mounting ./api over /app hid src/, monitoring/ and models/.
 services:
   api:
@@ -12,7 +13,7 @@ services:
     image: ${DOCKERHUB_USERNAME:-siegried}/immo-eliza-api:latest
     container_name: immo-api
     ports:
-      - "8003:8000"
+      - "8008:8000"
     restart: unless-stopped
 
   streamlit:

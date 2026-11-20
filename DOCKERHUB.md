@@ -26,9 +26,9 @@ Images from this repository:
 
 ```bash
 docker network create immo
-docker run -d --name api --network immo -p 8003:8000 siegried/immo-eliza-api
+docker run -d --name api --network immo -p 8008:8000 siegried/immo-eliza-api
 docker run -d --name ui --network immo -p 8508:10000 -e API_URL=http://api:8000 siegried/immo-eliza-ui
-# open http://localhost:8508 (API docs: http://localhost:8003/docs)
+# open http://localhost:8508 (API docs: http://localhost:8008/docs)
 ```
 
 ## Environment variables
