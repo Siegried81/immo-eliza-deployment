@@ -46,13 +46,14 @@ class PropertyInput(BaseModel):
     livable_surface: int = Field(..., gt=0)
     total_surface: Optional[int] = Field(None, ge=0, description="Plot surface in m²; 0 or missing means unknown.")
     # Missing, not 1: a left-out count goes to the pipeline's median imputer
-    # (3 bedrooms), as a training row without one did.
+    # (3 bedrooms), as a training row without one does.
     bedroom_count: Optional[int] = Field(None, ge=0)
     # Missing, not 2000: a left-out year goes to the pipeline's median imputer,
     # like a training row without one (src/features.py::add_features).
     build_year: Optional[int] = Field(None, ge=1800)
     garage: int = Field(0, ge=0, description="Treated as yes/no: any value above 0 means a garage.")
-    garden_m2: int = Field(0, ge=0, description="Accepted for backward compatibility; the models do not use it.")
+    garden_m2: int = Field(0, ge=0, deprecated=True,
+                         description="Ignored: no model reads it. Kept so existing clients that send it still validate.")
     # Missing, not 0: 5.7% of the training listings don't say, and the median
     # imputer filled them with 1 (a terrace). Send 0 for "no terrace".
     terrace: Optional[int] = Field(None, ge=0, description="Treated as yes/no: any value above 0 means a "
@@ -101,7 +102,7 @@ def predict(property_input: PropertyInput):
     try:
         result = engine.predict(data)
     except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
+        raise HTTPException(status_code=422, detail=str(e)) from e
 
     try:
         chosen = route(result, LUXURY_THRESHOLD)
@@ -123,7 +124,7 @@ def predict(property_input: PropertyInput):
     except Exception:
         # The traceback goes to the server log; the client gets no internals.
         logger.exception("Prediction failed")
-        raise HTTPException(status_code=500, detail="Internal error while computing the estimate.")
+        raise HTTPException(status_code=500, detail="Internal error while computing the estimate.") from None
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8000")))
