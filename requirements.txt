@@ -1,17 +1,15 @@
-fastapi
-uvicorn
+fastapi==0.165.0
+uvicorn==0.54.0
 streamlit==1.67.0
-pandas
-numpy
+pandas==3.1.1
+numpy==2.5.5
+pydantic==2.14.4
+requests==2.34.2
 
-# The models in models/ are pickled: these three must match the versions they
-# were trained with, or loading fails (category_encoders >= 2.10 raises
+# The models in models/ are pickled: these must match the versions they were
+# trained with, or loading fails (category_encoders >= 2.10 raises
 # AttributeError on the fitted TargetEncoder). Re-pin after retraining.
 scikit-learn==1.9.0
 xgboost==3.2.0
 category_encoders==2.8.1
-joblib
-
-requests
-python-dotenv
-pydantic
+joblib==1.6.0
