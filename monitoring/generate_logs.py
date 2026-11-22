@@ -7,8 +7,8 @@ tooling, not production. They are tagged source="synthetic" and go to their
 own file, never to the real prediction log.
 
 Run:
-    python monitoring/generate_logs.py [n]
-    python monitoring/check_drift.py monitoring/synthetic_logs.jsonl
+    python -m monitoring.generate_logs [n]
+    python -m monitoring.check_drift monitoring/synthetic_logs.jsonl
 """
 import sys
 from pathlib import Path
@@ -16,12 +16,10 @@ from pathlib import Path
 import joblib
 import numpy as np
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PROJECT_ROOT))
-sys.path.insert(0, str(PROJECT_ROOT / "src"))
+from monitoring.monitor import log_prediction
+from src.features import CATEGORICAL_FEATURES, NUMERIC_FEATURES
 
-from monitoring.monitor import log_prediction  # noqa: E402
-from src.features import CATEGORICAL_FEATURES, NUMERIC_FEATURES  # noqa: E402
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 SYNTHETIC_LOG = PROJECT_ROOT / "monitoring" / "synthetic_logs.jsonl"
 SEED = 42
@@ -29,7 +27,7 @@ SEED = 42
 
 def populate_logs(n=1500, path=SYNTHETIC_LOG):
     """Replace `path` with `n` validation rows (sampled with a fixed seed) and their predictions."""
-    from train import TARGET, load_dataset, split
+    from src.train import TARGET, load_dataset, split
 
     _, val = split(load_dataset())
     sample = val.sample(n=n, replace=n > len(val), random_state=SEED)

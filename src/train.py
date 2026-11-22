@@ -1,18 +1,26 @@
-import os
 import json
+import os
+from pathlib import Path
+
 import joblib
 import numpy as np
 import pandas as pd
-import xgboost as xgb
-from pathlib import Path
-from xgboost import XGBRegressor, XGBClassifier
 from category_encoders import TargetEncoder
-from sklearn.model_selection import train_test_split
 from sklearn.compose import ColumnTransformer
-from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
-from features import (CATEGORICAL_FEATURES, LOCATIONS_PATH, NUMERIC_FEATURES, add_features,
-                      add_location, build_locations, to_model_columns)
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from xgboost import XGBClassifier, XGBRegressor
+
+from src.features import (
+    CATEGORICAL_FEATURES,
+    LOCATIONS_PATH,
+    NUMERIC_FEATURES,
+    add_features,
+    add_location,
+    build_locations,
+    to_model_columns,
+)
 
 # Paths & Constants
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -32,9 +40,9 @@ TARGET = "price"
 # The bound is set on the price alone, never on how wrong a model is on a row.
 MIN_PLAUSIBLE_PRICE = 10_000
 
-# Chosen on the old validation split (scripts/evaluate_stratified.py,
-# 2026-10-11) and checked, not re-tuned, on the new one: it holds 19 luxury
-# rows, too few to tune on. The classifier's probabilities are inflated by
+# Chosen on the old validation split (scripts/evaluate_stratified.py) and
+# checked, not re-tuned, on the new one: it holds 19 luxury rows, too few to
+# tune on. The classifier's probabilities are inflated by
 # scale_pos_weight (~98), so at 0.7 most routed properties weren't luxury and
 # jumped to a luxury-model price.
 DEFAULT_ROUTING_THRESHOLD = 0.9
@@ -45,11 +53,10 @@ DEFAULT_ROUTING_THRESHOLD = 0.9
 #   calibration   5%  the conformal margin of the price range, nothing else
 #   test         15%  sealed: only the final figures read it (monitoring/metrics.py,
 #                     scripts/evaluate_stratified.py --test, the range coverage)
-# Until 2026-11-10 there was one 80/20 split (LEGACY_VALIDATION_SIZE) and its
-# 20% did everything validation does now, plus the published figures. The test
-# rows are drawn from that old 80% only, so no earlier choice (the 0.9
-# threshold, the October search, the blend comparison) was ever scored on them.
-# Drawn with the same seed, a fresh 15% would sit entirely inside the old 20%.
+# The test rows are drawn from the 80% that an earlier 80/20 split
+# (LEGACY_VALIDATION_SIZE) left for training, so no earlier choice (the 0.9
+# threshold, the October search, the blend comparison) was scored on them.
+# Drawn with the same seed, a fresh 15% would sit entirely inside that old 20%.
 TEST_SIZE = 0.15
 CALIBRATION_SIZE = 0.05
 VALIDATION_SIZE = 0.10
@@ -130,8 +137,8 @@ def clipped_log_target(prices, bounds):
 def price_tiers(luxury_price):
     """Below €1M, €1M up to the luxury price, and the luxury segment."""
     return [("< €1M", 0, 1_000_000),
-            (f"€1M - €{luxury_price / 1e6:.1f}M", 1_000_000, luxury_price),
-            (f">= €{luxury_price / 1e6:.1f}M", luxury_price, float("inf"))]
+            (f"€1M - €{luxury_price / 1e6:.2f}M", 1_000_000, luxury_price),
+            (f">= €{luxury_price / 1e6:.2f}M", luxury_price, float("inf"))]
 
 
 def conformal_margin(lower_log, upper_log, y_log, coverage):
@@ -218,7 +225,7 @@ def train():
     LOCATIONS_PATH.write_text(json.dumps(build_locations(df.loc[X_train.index]), ensure_ascii=False, indent=1),
                               encoding="utf-8")
 
-    # Prediction Interval (Quantile Regression) 
+    # Prediction Interval (Quantile Regression)
     lower_model = quantile_regressor(QUANTILE_LOWER)
     lower_model.fit(X_train_p, y_train, eval_set=[(X_val_p, y_val)], verbose=False)
     joblib.dump(Pipeline([("preprocessor", preprocessor), ("model", lower_model)]), PIPELINE_LOWER_PATH)
@@ -227,7 +234,7 @@ def train():
     upper_model.fit(X_train_p, y_train, eval_set=[(X_val_p, y_val)], verbose=False)
     joblib.dump(Pipeline([("preprocessor", preprocessor), ("model", upper_model)]), PIPELINE_UPPER_PATH)
 
-    # Luxury Routing Classifier 
+    # Luxury Routing Classifier
     luxury_price_threshold = bounds[1]
     y_lux = (df[TARGET] > luxury_price_threshold).astype(int)
 
@@ -267,7 +274,7 @@ def train():
         joblib.dump(Pipeline([("preprocessor", preprocessor), ("model", luxury_model)]), PIPELINE_LUXURY_PATH)
         luxury_model_available = True
     else:
-        print(f"Warning: only {len(X_lux_train)} luxury rows in the training split — "
+        print(f"Warning: only {len(X_lux_train)} luxury rows in the training split, "
               f"skipping luxury regressor training (need >= 20).")
         luxury_model_available = False
 

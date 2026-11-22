@@ -1,8 +1,8 @@
 """
 Publish the app as a Hugging Face Space, or the models as a Hub model repo.
 
-    python scripts/publish_hf.py space            # list what would be uploaded
-    python scripts/publish_hf.py model --push     # create the repo and upload
+    python -m scripts.publish_hf space            # list what would be uploaded
+    python -m scripts.publish_hf model --push     # create the repo and upload
 
 Only files tracked by git are published, plus the Hub-specific files in hf/
 (mapped to the repo root, where the Hub expects a README and a Dockerfile).

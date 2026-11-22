@@ -11,8 +11,13 @@ from fastapi.testclient import TestClient
 
 import api.app
 from api.app import app
-from src.train import (DEFAULT_ROUTING_THRESHOLD, LUXURY_THRESHOLD_PATH,
-                       QUANTILE_LOWER, QUANTILE_UPPER, quantile_regressor)
+from src.train import (
+    DEFAULT_ROUTING_THRESHOLD,
+    LUXURY_THRESHOLD_PATH,
+    QUANTILE_LOWER,
+    QUANTILE_UPPER,
+    quantile_regressor,
+)
 
 client = TestClient(app)
 
@@ -31,6 +36,18 @@ class TestRoutingThreshold:
         # A guessed threshold silently changes which model prices a property.
         with pytest.raises(FileNotFoundError):
             api.app.load_routing_threshold(tmp_path / "luxury_threshold.json")
+
+
+class TestRoutingWithoutLuxuryModel:
+    def test_a_training_run_without_a_luxury_model_routes_nothing_to_luxury(self, tmp_path):
+        """train.py records luxury_model_available=false when it had too few luxury
+        rows; the stale luxury file left behind must not price anything."""
+        path = tmp_path / "luxury_threshold.json"
+        path.write_text('{"routing_probability_threshold": 0.9, "luxury_model_available": false}')
+        threshold = api.app.load_routing_threshold(path)
+        result = {"prediction": 300_000.0, "luxury_prediction": 9e9, "luxury_proba": 1.0,
+                  "prediction_interval": {"lower": 1.0, "upper": 2.0}}
+        assert api.app.route(result, threshold)["segment"] == "standard"
 
 
 class TestServerErrors:
@@ -73,6 +90,7 @@ class TestQuantileRegressor:
 
     def test_committed_models_match_that_configuration(self):
         import joblib
+
         from api.predict import MODEL_DIR
         for alpha, name in [(QUANTILE_LOWER, "pipeline_lower.joblib"),
                             (QUANTILE_UPPER, "pipeline_upper.joblib")]:
@@ -91,6 +109,7 @@ class TestOmittedBedroomCount:
 
     def test_omitted_bedroom_count_is_priced_at_the_training_median(self):
         import joblib
+
         from api.predict import MODEL_DIR
         from src.features import NUMERIC_FEATURES
 

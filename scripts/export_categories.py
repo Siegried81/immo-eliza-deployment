@@ -12,17 +12,16 @@ the city list and counts match the rows the encoder was actually fitted on.
 data/ is not versioned, which is why the result is committed under models/.
 
 Run after every retraining:
-    python scripts/export_categories.py
+    python -m scripts.export_categories
 """
 import json
-import sys
 from pathlib import Path
 
 import pandas as pd
 
+from src.train import load_dataset, split
+
 BASE_DIR = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(BASE_DIR / "src"))
-from train import load_dataset, split  # noqa: E402
 
 OUTPUT_PATH = BASE_DIR / "models" / "categories.json"
 

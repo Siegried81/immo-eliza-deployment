@@ -10,7 +10,6 @@ zero margin, and a search tuned on a different setup from the shipped model.
 Nothing here needs data/, except the generator test, skipped without it.
 """
 import json
-import sys
 import threading
 from pathlib import Path
 
@@ -21,18 +20,23 @@ from fastapi.testclient import TestClient
 from sklearn.model_selection import train_test_split
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "src"))
 
 import api.app  # noqa: E402
-from api.predict import (CALIBRATION_PATH, engine, load_interval_margin,  # noqa: E402
-                         route)
+from api.predict import CALIBRATION_PATH, engine, load_interval_margin, route  # noqa: E402
 from monitoring import check_drift, monitor  # noqa: E402
 from scripts.predict_cli import parse_answers  # noqa: E402
-from src.features import (CATEGORICAL_FEATURES, MONITORED_FEATURES,  # noqa: E402
-                          NUMERIC_FEATURES)
-from src.train import (DATA_PATH, LEGACY_VALIDATION_SIZE, SPLIT_SEED, build_preprocessor,  # noqa: E402
-                       clipped_log_target, price_bounds, price_tiers, split,
-                       split_all)
+from src.features import CATEGORICAL_FEATURES, MONITORED_FEATURES, NUMERIC_FEATURES  # noqa: E402
+from src.train import (  # noqa: E402
+    DATA_PATH,
+    LEGACY_VALIDATION_SIZE,
+    SPLIT_SEED,
+    build_preprocessor,
+    clipped_log_target,
+    price_bounds,
+    price_tiers,
+    split,
+    split_all,
+)
 
 APARTMENT = {"postcode": 1050, "province": "Brussels", "city": "Elsene",
              "property_type": "apartment", "livable_surface": 85}
@@ -191,7 +195,7 @@ class TestSharedTrainingHelpers:
         assert not set(split_all(X)[3].index) & set(old_validation.index)
 
     def test_implausible_prices_leave_without_moving_any_other_row(self):
-        from train import MIN_PLAUSIBLE_PRICE
+        from src.train import MIN_PLAUSIBLE_PRICE
         clean = pd.DataFrame({"price": [100_000] * 2000})
         dirty = clean.copy()
         dirty.loc[[3, 700, 1500], "price"] = [2_500, 3_048, MIN_PLAUSIBLE_PRICE - 1]
@@ -216,6 +220,9 @@ class TestSharedTrainingHelpers:
         assert price_bounds(train) == price_bounds(everything.iloc[:800])
         assert price_bounds(train) != price_bounds(everything)
 
+    def test_the_luxury_tier_is_labelled_with_the_threshold_it_really_has(self):
+        assert price_tiers(1_949_050)[1][0] == "€1M - €1.95M"
+
     def test_price_tiers_cover_every_price_once(self):
         tiers = price_tiers(1_900_000)
         assert [(low, high) for _, low, high in tiers] == [
@@ -232,7 +239,7 @@ class TestOptimize:
             return low
 
     def test_search_scores_the_shipped_setup(self):
-        import optimize
+        from src import optimize
         rng = np.random.default_rng(0)
         X = rng.normal(size=(120, 3))
         y = pd.Series(X[:, 0] + rng.normal(scale=0.1, size=120))

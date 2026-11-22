@@ -1,10 +1,5 @@
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-import pytest
 from fastapi.testclient import TestClient
+
 from api.app import app
 
 client = TestClient(app)
@@ -49,12 +44,7 @@ class TestPredict:
         }
 
         response = client.post("/predict", json=payload)
-        
-        # Print the actual error message returned by the server if validation fails
-        if response.status_code != 200:
-            print("\nAPI Error Response:", response.json())
-            
-        assert response.status_code == 200
+        assert response.status_code == 200, response.json()
 
     def test_predict_invalid_postcode(self):
         """

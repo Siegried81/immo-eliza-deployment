@@ -6,9 +6,18 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
 COPY requirements.txt .
-RUN --mount=type=cache,target=/root/.cache/pip     pip install --upgrade pip &&     pip install --only-binary=:all: -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip && \
+    pip install --only-binary=:all: -r requirements.txt
 
-COPY . .
+# Only what the API imports at run time: no docs, tests, scripts, UI or Hugging Face files.
+# The service writes its prediction log under monitoring/, so the app user owns /app.
+RUN useradd --create-home --uid 1000 app && chown app:app /app
+COPY --chown=app:app api/ api/
+COPY --chown=app:app src/ src/
+COPY --chown=app:app monitoring/ monitoring/
+COPY --chown=app:app models/ models/
+USER app
 
 EXPOSE 8000
 

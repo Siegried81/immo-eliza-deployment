@@ -33,23 +33,17 @@ docker run -d --name ui --network immo -p 8508:10000 -e API_URL=http://api:8000 
 
 ## Environment variables
 
-None are required, and neither image needs a secret. Pass them at run time with
-`-e NAME=value` or `--env-file .env` (`.env.example` in the repo lists them with
-their defaults).
+None are required and neither image needs a secret. Pass them with `-e NAME=value` or `--env-file .env` (`.env.example` in the repo lists them).
 
 | Variable | Purpose |
 |---|---|
 | `API_URL` | UI only: where the API answers (default `http://localhost:8000`) |
 | `API_DOCS_URL` | UI only: the "API documentation" link (default `$API_URL/docs`; empty hides it) |
-| `PREDICTION_LOG_PATH` | API only: where the prediction log is appended (default `monitoring/logs.jsonl`) |
-| `PORT` | listening port, set automatically on Render |
+| `PREDICTION_LOG_PATH` | API only: where predictions are logged (default `monitoring/logs.jsonl`) |
+| `PORT` | Listening port; set automatically on Render |
 
-## Volumes
-
-- none: the image is self-contained
+The API image runs as a non-root user and has no volume: the prediction log lives inside the container unless you mount a path and point `PREDICTION_LOG_PATH` at it.
 
 ## License
 
-See the LICENSE file in the source repository, if any. As with every image, it is
-your responsibility to check that your use complies with the licenses of the
-software it contains.
+See the LICENSE file in the source repository, if any. Check that your use complies with the licenses of the software the images contain.

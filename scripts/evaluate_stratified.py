@@ -19,8 +19,8 @@ Tiers split at the luxury price threshold from models/luxury_threshold.json,
 which is what the classifier was trained to detect.
 
 Run:
-    python scripts/evaluate_stratified.py           # choose the threshold
-    python scripts/evaluate_stratified.py --test    # final figures
+    python -m scripts.evaluate_stratified           # choose the threshold
+    python -m scripts.evaluate_stratified --test    # final figures
 """
 import json
 import sys
@@ -30,9 +30,9 @@ import joblib
 import numpy as np
 import pandas as pd
 
+from src.train import TARGET, load_dataset, price_tiers, split_all
+
 BASE_DIR = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(BASE_DIR / "src"))
-from train import TARGET, load_dataset, price_tiers, split_all  # noqa: E402
 
 MODEL_DIR = BASE_DIR / "models"
 THRESHOLDS = [0.5, 0.6, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.01]  # 1.01 = no routing

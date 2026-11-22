@@ -8,18 +8,15 @@ headline figure. The earlier "true holdout" (rows absent from
 data/training_baseline.csv) still held ~80% of the training rows.
 """
 import json
-import sys
-import joblib
-import numpy as np
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-SRC_DIR = BASE_DIR / "src"
-sys.path.insert(0, str(SRC_DIR))
-
+import joblib
+import numpy as np
 from sklearn.metrics import r2_score
 
-from train import DATA_PATH, TARGET, load_dataset, price_tiers, split_all
+from src.train import DATA_PATH, TARGET, load_dataset, price_tiers, split_all
+
+BASE_DIR = Path(__file__).resolve().parent.parent
 
 PIPELINE_PATH = BASE_DIR / "models" / "pipeline.joblib"
 LUXURY_PRICE = json.loads((BASE_DIR / "models" / "luxury_threshold.json").read_text())["luxury_price_threshold"]
@@ -79,7 +76,7 @@ if __name__ == "__main__":
         print(f"MAPE                    : {mape:.2f}%")
         print(f"R² (euros)              : {r2_score(actuals, predictions):.4f}")
 
-        print(f"\nBias analysis")
+        print("\nBias analysis")
         bias = "underestimating" if mpe > 0 else "overestimating"
         print(f"The model is {bias} prices by {abs(mpe):.2f}% on average.")
         # The mean above is pulled up by the cheap listings (an estimate at

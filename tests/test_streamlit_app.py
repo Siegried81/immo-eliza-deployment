@@ -9,8 +9,9 @@ from pathlib import Path
 
 import pytest
 import requests
-import streamlit as st
 from streamlit.testing.v1 import AppTest
+
+import streamlit as st
 
 APP_PATH = str(Path(__file__).resolve().parent.parent / "streamlit" / "app.py")
 

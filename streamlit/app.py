@@ -16,6 +16,7 @@ from datetime import date
 from pathlib import Path
 
 import requests
+
 import streamlit as st
 
 # `streamlit run streamlit/app.py` puts only streamlit/ on sys.path (Streamlit

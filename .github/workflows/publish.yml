@@ -101,15 +101,14 @@ jobs:
           done
           echo "no answer on ${{ matrix.health }} after 60 s"; docker logs smoke; exit 1
 
-      # Known HIGH/CRITICAL CVEs in the image, the way official images are
-      # scanned on Docker Hub. Report only (exit-code 0): a CVE in the base
-      # image is fixed by a rebuild, not by blocking the publish.
+      # Known CRITICAL CVEs with a fix available: they stop the publish. HIGH ones
+      # and CVEs nobody has fixed yet would block on things a rebuild cannot cure.
       - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
         with:
           image-ref: smoke:local
-          severity: HIGH,CRITICAL
+          severity: CRITICAL
           ignore-unfixed: true
-          exit-code: "0"
+          exit-code: "1"
 
       # Push the real tags. Every layer is already in the cache, so this is an
       # upload, not a second build.

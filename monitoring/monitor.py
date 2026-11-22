@@ -13,7 +13,7 @@ and restart, and a log that does not survive cannot be monitored.
 import json
 import os
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -22,6 +22,9 @@ import pandas as pd
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_LOG_FILE = BASE_DIR / "logs.jsonl"
 _LOCK = threading.Lock()
+
+# PSI above this is strong drift (monitoring/check_drift.py reads it the same way).
+STRONG_PSI = 0.25
 
 
 def log_file() -> Path:
@@ -40,7 +43,7 @@ def log_prediction(input_data: dict, prediction: float, features: dict | None = 
     is printed.
     """
     entry = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "source": source,
         "input": input_data,
         "features": features or {},
@@ -85,7 +88,7 @@ def psi(expected, actual, bins=10):
     return float(psi_value)
 
 
-def detect_drift(train_df: pd.DataFrame, live_df: pd.DataFrame, threshold=0.25):
+def detect_drift(train_df: pd.DataFrame, live_df: pd.DataFrame, threshold=STRONG_PSI):
     """
     PSI of every numeric column present in both frames, flagged above `threshold`.
 

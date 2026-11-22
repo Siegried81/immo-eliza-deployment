@@ -1,16 +1,22 @@
 import json
-import sys
-import joblib
-import pandas as pd
-import numpy as np
 from pathlib import Path
+
+import joblib
+import numpy as np
+import pandas as pd
+
+from src.features import (
+    CATEGORICAL_FEATURES,
+    NUMERIC_FEATURES,
+    add_features,
+    add_location,
+    load_locations,
+    load_vocabulary,
+    to_training_vocabulary,
+)
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 MODEL_DIR = BASE_DIR / "models"
-sys.path.append(str(BASE_DIR / "src"))
-
-from src.features import (CATEGORICAL_FEATURES, NUMERIC_FEATURES, add_features, add_location,
-                          load_locations, load_vocabulary, to_training_vocabulary)
 
 THRESHOLD_PATH = MODEL_DIR / "luxury_threshold.json"
 
@@ -21,8 +27,13 @@ def load_routing_threshold(path: Path = THRESHOLD_PATH) -> float:
 
     No fallback: a guessed value silently changes which model prices a
     property, so a missing file or key stops the service at start-up instead.
+    When training found too few luxury rows to fit a luxury model
+    (`luxury_model_available` false), the threshold is infinite: the luxury
+    file left on disk is from an earlier run and must not price anything.
     """
-    return float(json.loads(Path(path).read_text(encoding="utf-8"))["routing_probability_threshold"])
+    config = json.loads(Path(path).read_text(encoding="utf-8"))
+    threshold = float(config["routing_probability_threshold"])
+    return threshold if config.get("luxury_model_available", True) else float("inf")
 
 
 CALIBRATION_PATH = MODEL_DIR / "interval_calibration.json"

@@ -21,11 +21,11 @@ LOCATIONS_PATH = Path(__file__).resolve().parent.parent / "models" / "locations.
 LOW_SAMPLE_CITY = 20
 
 # Keys are spelled the way the training data and models/categories.json spell
-# the states: upper case, words separated by a SPACE. They used to carry an
-# underscore ("TO_RENOVATE"), which no row ever matched, so every multi-word
-# state fell through to NORMAL, ordinal 3 and its energy figure, in training and at
-# inference alike. Changing the keys changes two numeric features for those
-# states, so the models have to be retrained after this (python src/train.py).
+# the states: upper case, words separated by a SPACE. An underscore key
+# ("TO_RENOVATE") matches no row and sends a multi-word state to NORMAL, ordinal
+# 3 and its energy figure, in training and at inference alike. Changing a key
+# changes two numeric features, so the models have to be retrained
+# (python -m src.train).
 #
 # The consumption a listing gets when it gives none: the median of the training
 # listings in the same state that do give one, rounded to 10 kWh. A property
@@ -112,11 +112,11 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
 
     # Ensure required columns exist. A build year, count or distance the caller
     # didn't give is missing (None), not 0, 1 or a year: the pipeline's median
-    # imputer then fills it as it did for a training row without it. The training data has
-    # every column, so these defaults only reach callers such as a direct
-    # engine.predict() with the required fields alone. Garage and pool stay at
-    # 0: no training row lacks them, so "not given" has no trained meaning and
-    # "none" is the reading a caller expects.
+    # imputer then fills it as it did for a training row without it. The
+    # training data has every column, so these defaults only reach callers such
+    # as a direct engine.predict() with the required fields alone. Garage and
+    # pool stay at 0: no training row lacks them, so "not given" has no trained
+    # meaning and "none" is the reading a caller expects.
     defaults = {
         "property_state": "NORMAL",
         "build_year": None,
@@ -171,8 +171,8 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
 
     # Property age. A missing build year stays missing, and so does the age:
     # the pipeline's median imputer, fitted on the training split, fills both.
-    # It used to become CURRENT_YEAR (a new build) here, while the API sent
-    # 2000 for the same missing year. One rule now, for training and requests.
+    # One rule for training and requests, so a year left out is priced the same
+    # whichever path it takes.
     df["build_year"] = pd.to_numeric(df["build_year"], errors="coerce")
     df["property_age"] = CURRENT_YEAR - df["build_year"]
 
@@ -265,9 +265,9 @@ def _key(text) -> str:
 # Belgian municipalities have an official name per language, and the training
 # data keeps only one of them: mostly the Dutch name in Flanders and Brussels,
 # the French name in Wallonia, with a few English exceptions ("Antwerp",
-# "Brussels", "Liege"). A user who types the name in the other language got no
-# match, and with it the "city not in the training data" note plus a worse
-# estimate, for cities the models know perfectly well.
+# "Brussels", "Liege"). A user who types the name in the other language would
+# get no match, hence the "city not in the training data" note and a worse
+# estimate, for a city the models know perfectly well.
 #
 # Alias -> the spelling used in models/categories.json. Only genuine
 # translations of the same municipality belong here, never a nearby one.

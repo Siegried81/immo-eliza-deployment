@@ -49,7 +49,7 @@ monitoring/*.jsonl
 *.pickle
 
 
-data/  
+data/
 models/*
 !models/pipeline.joblib
 !models/pipeline_luxury.joblib
@@ -59,10 +59,8 @@ models/*
 !models/locations.json
 !models/interval_calibration.json
 !models/pipeline_lower.joblib
-!models/pipeline_upper.joblib 
+!models/pipeline_upper.joblib
 *.csv
 
 
 .docker/
-
-*.DS_Store
