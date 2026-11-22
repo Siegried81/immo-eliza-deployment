@@ -23,6 +23,9 @@ BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_LOG_FILE = BASE_DIR / "logs.jsonl"
 _LOCK = threading.Lock()
 
+# PSI above this is strong drift (monitoring/check_drift.py reads it the same way).
+STRONG_PSI = 0.25
+
 
 def log_file() -> Path:
     """Where predictions are logged; read at call time so tests and deploys can move it."""
@@ -85,7 +88,7 @@ def psi(expected, actual, bins=10):
     return float(psi_value)
 
 
-def detect_drift(train_df: pd.DataFrame, live_df: pd.DataFrame, threshold=0.25):
+def detect_drift(train_df: pd.DataFrame, live_df: pd.DataFrame, threshold=STRONG_PSI):
     """
     PSI of every numeric column present in both frames, flagged above `threshold`.
 

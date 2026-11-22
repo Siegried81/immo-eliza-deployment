@@ -33,6 +33,18 @@ class TestRoutingThreshold:
             api.app.load_routing_threshold(tmp_path / "luxury_threshold.json")
 
 
+class TestRoutingWithoutLuxuryModel:
+    def test_a_training_run_without_a_luxury_model_routes_nothing_to_luxury(self, tmp_path):
+        """train.py records luxury_model_available=false when it had too few luxury
+        rows; the stale luxury file left behind must not price anything."""
+        path = tmp_path / "luxury_threshold.json"
+        path.write_text('{"routing_probability_threshold": 0.9, "luxury_model_available": false}')
+        threshold = api.app.load_routing_threshold(path)
+        result = {"prediction": 300_000.0, "luxury_prediction": 9e9, "luxury_proba": 1.0,
+                  "prediction_interval": {"lower": 1.0, "upper": 2.0}}
+        assert api.app.route(result, threshold)["segment"] == "standard"
+
+
 class TestServerErrors:
     def test_500_does_not_send_exception_text(self, monkeypatch):
         # The engine result lacks "prediction_interval": a KeyError inside /predict.

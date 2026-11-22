@@ -216,6 +216,9 @@ class TestSharedTrainingHelpers:
         assert price_bounds(train) == price_bounds(everything.iloc[:800])
         assert price_bounds(train) != price_bounds(everything)
 
+    def test_the_luxury_tier_is_labelled_with_the_threshold_it_really_has(self):
+        assert price_tiers(1_949_050)[1][0] == "€1M - €1.95M"
+
     def test_price_tiers_cover_every_price_once(self):
         tiers = price_tiers(1_900_000)
         assert [(low, high) for _, low, high in tiers] == [

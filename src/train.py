@@ -130,8 +130,8 @@ def clipped_log_target(prices, bounds):
 def price_tiers(luxury_price):
     """Below €1M, €1M up to the luxury price, and the luxury segment."""
     return [("< €1M", 0, 1_000_000),
-            (f"€1M - €{luxury_price / 1e6:.1f}M", 1_000_000, luxury_price),
-            (f">= €{luxury_price / 1e6:.1f}M", luxury_price, float("inf"))]
+            (f"€1M - €{luxury_price / 1e6:.2f}M", 1_000_000, luxury_price),
+            (f">= €{luxury_price / 1e6:.2f}M", luxury_price, float("inf"))]
 
 
 def conformal_margin(lower_log, upper_log, y_log, coverage):
