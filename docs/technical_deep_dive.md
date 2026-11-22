@@ -1,351 +1,96 @@
 # Technical deep dive
 
-How the price estimator works, why it is built this way, and what is still
-weak. The README says what the service does and how to run it; this document
-is for the person who has to change it.
-
-Every figure below was measured by the scripts named next to it and is quoted
-from the README or from `models/interval_calibration.json`. They come from the
-models retrained on 2026-11-10 with a sealed test split (`docs/decisions.md`).
-
----
+How the price estimator works, why it is built this way, and what is still weak. The README says how to run it; this document is for the person who has to change it. Figures come from the scripts named next to them and from `models/interval_calibration.json`.
 
 ## 1. The request, end to end
 
 ```
-Streamlit UI ──POST /predict──▶ FastAPI (api/app.py)
-                                  │  pydantic validation (PropertyInput)
-                                  ▼
-                       api/predict.py :: PredictEngine.predict
-                                  │  to_training_vocabulary()   src/features.py
-                                  │  add_features()             src/features.py
-                                  ▼
-            ┌────────────┬────────────┬──────────────┬─────────────┐
-            standard     luxury       luxury         10th / 90th
-            regressor    regressor    classifier     quantile models
-            └────────────┴────────────┴──────────────┴─────────────┘
-                                  │
-                       api/app.py :: routing (p ≥ 0.9 → luxury)
-                                  │  range only for the standard segment
-                                  ▼
-                       JSON response  +  monitoring/logs.jsonl
+Streamlit UI --POST /predict--> FastAPI (api/app.py)
+                                  | pydantic validation (PropertyInput)
+                                  v
+                    api/predict.py :: PredictEngine.predict
+                                  | to_training_vocabulary()   src/features.py
+                                  | add_features(), add_location()
+                                  v
+        standard regressor | luxury regressor | luxury classifier | 10th/90th quantile models
+                                  |
+                    api/app.py :: routing (p >= 0.9 -> luxury)
+                                  v
+                    JSON response + prediction log (JSON Lines)
 ```
 
-The five models are `sklearn.Pipeline`s that share one fitted preprocessor
-(median imputation for numbers, most-frequent imputation then a
-`TargetEncoder` for `property_type`, `province`, `city`, `property_state`).
-All five run on every request; `api/app.py` then keeps one price.
+The five models are `sklearn.Pipeline`s sharing one preprocessor (median imputation for numbers, most-frequent imputation then a `TargetEncoder` for property type, province, city and state). All five run on every request; the API keeps one price.
 
-| Artifact | Built by | Role |
-|---|---|---|
-| `models/pipeline.joblib` | `src/train.py` | Standard regressor, log-price, prices clipped to the 1st–99th percentile |
-| `models/pipeline_lower.joblib`, `pipeline_upper.joblib` | `src/train.py` | 10th and 90th percentile models for the range |
-| `models/luxury_classifier.joblib` | `src/train.py` | Probability that a property is above the 99th percentile of the training prices (€1.95M) |
-| `models/pipeline_luxury.joblib` | `src/train.py` | Regressor trained only on the luxury rows, unclipped prices |
-| `models/luxury_threshold.json` | `src/train.py` | Luxury price (€1.95M) and routing threshold (0.9) |
-| `models/interval_calibration.json` | `src/train.py` | Conformal margin for the range, with the coverage it reaches |
-| `models/categories.json` | `scripts/export_categories.py` | The categories the models were fitted on |
-
----
+| Artifact | Role |
+|---|---|
+| `pipeline.joblib` | Standard regressor, log price, prices clipped to the 1st-99th percentile |
+| `pipeline_lower.joblib`, `pipeline_upper.joblib` | 10th and 90th percentile models for the range |
+| `luxury_classifier.joblib` | Probability that a property is above the 99th percentile of training prices (about €1.95M) |
+| `pipeline_luxury.joblib` | Regressor trained on the luxury rows only, unclipped prices |
+| `luxury_threshold.json`, `interval_calibration.json` | Routing threshold (0.9), conformal margin of the range |
+| `categories.json`, `locations.json` | Training vocabulary; median coordinates of each training postcode and city |
 
 ## 2. The vocabulary contract
 
-**The single most important rule in this repo: the model only understands the
-exact strings it was trained on.** A `TargetEncoder` maps any string it never
-saw to the global mean. Before the fix, the UI sent `HOUSE`, `Liège` and
-`TO_RENOVATE` where training had `house`, `liege` and `TO RENOVATE`, so the
-model silently ignored property type, province and condition (README, bug #1).
+**The model only understands the exact strings it was trained on.** A `TargetEncoder` maps any unseen string to the global mean. Once, the UI sent `HOUSE`, `Liège` and `TO_RENOVATE` where training had `house`, `liege` and `TO RENOVATE`, and the model silently ignored property type, province and condition.
 
-`src/features.py::to_training_vocabulary()` is the only gate between user input
-and the encoder:
+`src/features.py::to_training_vocabulary()` is the only gate between input and encoder:
 
-- property type, state and province are rewritten to the training spelling
-  (any case, accents, underscores, French/Dutch/English province names); an
-  unknown value raises `ValueError`, which the API turns into a 422;
-- the city goes through `CITY_ALIASES` (80 French/Dutch/English pairs for the
-  same municipality), then is looked up first in the user's province, then in
-  the others;
-- an unknown city is **kept** with a note rather than rejected, because the
-  estimate still works on the province and the property; a city with fewer
-  than `LOW_SAMPLE_CITY = 20` training rows gets a note too, because the
-  encoder then leans on the global mean;
-- it is idempotent: training-style input passes through unchanged, which is
-  what lets the API and the training data share one function.
+- type, state and province are rewritten to the training spelling (any case, accents, French/Dutch/English names); an unknown value raises `ValueError`, which the API answers with a 422;
+- the city goes through `CITY_ALIASES` (80 French/Dutch/English pairs), then is looked up in the user's province first;
+- an unknown city is kept with a note rather than rejected, and a city with fewer than 20 training rows gets a note too;
+- it is idempotent, so the API and the training data share one function.
 
-`models/categories.json` is read by both the API (to validate) and the UI (to
-build its choice lists), so the UI can only offer values the model knows.
+The rules for missing values, state keys, real columns and postcode locations, with their dates and the measured effects, are in [decisions.md](decisions.md).
 
-`add_features()` is the other shared function: energy consumption (the figure
-for the property's state, the median of the training listings in that state,
-when it is missing, 0 or above 1,000 kWh), total
-surface defaulting to 1.2 × livable surface, `property_age`,
-`property_state_encoded`. Train and inference call the same code, so they
-cannot drift apart. `add_location()` follows the same rule for the place: it
-adds the median coordinates of the postcode's training listings (the city's
-when the postcode has none), read from `models/locations.json`. The models
-are trained on those centroids and not on each listing's own coordinates,
-because a request carries a postcode and a city, never coordinates. The state dictionaries are keyed with spaces
-(`"TO RENOVATE"`), the way the data spells them; see `docs/decisions.md`,
-2026-10-10, for why that changed the numbers.
+## 3. Training (`python -m src.train`)
 
-**Missing is not zero.** Optional fields default to *missing* and are imputed
-as in training. They used to default to 0, a value that never occurs for plot
-surface or distances, which moved a typical Liège house by about +14%
-(README, bug #2). A plot surface of 0 is read as unknown for the same reason.
-
----
-
-## 3. Training (`src/train.py`)
-
-- **Data:** `data/clean/cleaned_data.json`, 15,746 listings scraped from
-  Immovlan. It is git-ignored, so a fresh clone cannot retrain.
-- **Split:** four disjoint parts from `split_all()`, `SPLIT_SEED = 42`. Train
-  11,020 rows (fits everything), validation 1,575 (early stopping, the Optuna
-  search, checking the routing threshold), calibration 787 (the range's margin
-  only), test 2,361 (sealed: only the final figures read it). The test rows
-  come from the old 80% training split, so the October threshold choice and
-  search never scored them (a fresh 15% with the same seed would have sat
-  inside the old 20% validation split). Every script imports these helpers,
-  so they all see the same rows.
-- **Target:** `log1p(price)`, clipped to the 1st to 99th percentile for the
-  standard and quantile models, the percentiles taken on the training rows
-  only (`price_bounds`). The clip caps the standard model at about €1.95M (€1,949,050),
-  which is why the luxury path exists.
-- **Missing build year:** stays missing in `add_features()`, like at the API,
-  and the median imputer fills it with the training median (1974). It used to
-  be 2000 at the API and the current year in training.
-- **Standard regressor:** XGBoost, `reg:absoluteerror`, hyperparameters from a
-  seeded Optuna search on the train and validation splits (`src/optimize.py`),
-  hard-coded into `train.py`.
-- **Luxury classifier:** XGBoost with `scale_pos_weight ≈ 98` (ratio of
-  non-luxury to luxury training rows). That weight inflates the probabilities, which is
-  why the routing threshold sits as high as 0.9 (section 4).
-- **Luxury regressor:** trained on the 111 luxury rows of the training split,
-  on **unclipped** prices. Training it on the clipped target made every luxury
-  target €1.9M and the model a constant (README, bug #7); a test now fails if
-  it becomes constant again.
-- **Deterministic on one machine:** two runs give identical models, and the
-  committed models are the ones `train.py` produces in the python:3.12 Linux
-  image (README, bug #9; section 8).
-
----
+- **Data:** `data/clean/cleaned_data.json`, 15,746 listings scraped once from Immovlan. It is git-ignored, so a fresh clone cannot retrain. Asking prices under €10,000 are not prices and are dropped from every split by `MIN_PLAUSIBLE_PRICE`, a rule that reads the price alone, never a model's error.
+- **Four disjoint splits** from `split_all()`, one seed: train 70% (fits everything), validation 10% (early stopping, Optuna, checking the routing threshold), calibration 5% (the range margin, nothing else), test 15% (sealed: only the final figures read it). Every script imports the same helpers.
+- **Target:** `log1p(price)`, clipped to the training rows' 1st-99th percentile for the standard and quantile models, so the standard model cannot predict above about €1.95M. That is why the luxury path exists.
+- **Standard regressor:** XGBoost, `reg:absoluteerror`, hyperparameters from a seeded Optuna search (`python -m src.optimize`, needs `pip install optuna`), hard-coded in `train.py`.
+- **Luxury classifier:** XGBoost with `scale_pos_weight` near 98, which inflates its probabilities and explains the high threshold. **Luxury regressor:** the 111 luxury rows, on unclipped prices; training it on the clipped target once made it answer €1.9M for every property, and a test now fails if it becomes constant.
+- **Reproducibility and the test split:** two runs on one machine give identical models, another machine can differ, so the committed models come from the `python:3.12` image with the pinned versions. Nothing is chosen by reading the test split. Both rules and their reasons are in [decisions.md](decisions.md).
 
 ## 4. Luxury routing
 
-The classifier decides which regressor prices the property. On the sealed test
-split (`scripts/evaluate_stratified.py --test`, README "Luxury Routing"):
+The classifier decides which regressor prices the property. On the test split (`python -m scripts.evaluate_stratified --test`):
 
-| Routing | Overall MAPE | < €1M | €1M to €1.95M | ≥ €1.95M (21 rows) |
+| Routing | Overall MAPE | < €1M | €1M to €1.95M | >= €1.95M (21 rows) |
 |---|---:|---:|---:|---:|
 | None | 20.3% | 19.8% | 26.2% | 50.6% |
 | **0.9 (deployed)** | **20.6%** | **19.9%** | **31.1%** | **44.0%** |
 
-What a reader has to know:
-
-- **Routing is kept for the top tier, not for the average.** It costs 0.3 point
-  of overall MAPE and 5 points on the €1M to €1.95M tier, and it cuts the luxury
-  bias from −50.6% to −41.3%.
-- **0.9 is kept, not proven best.** It was picked on the old validation split
-  and only checked on the new one, which has 19 luxury rows. There it cuts the
-  luxury MAPE from 50.5% to 40.8%. With 21 luxury rows in the test split, one
-  property moves the tier's MAPE by about 5 points.
-- **The switch is hard.** A property just under and just over the threshold can
-  get prices €1M apart. The obvious fixes were measured and rejected
-  (`scripts/evaluate_routing_blend.py`, validation split): a log-space blend
-  weighted by the raw probability helps the €1.95M+ tier (40.8% → 26.9% MAPE)
-  but pushes the < €1M mean bias from +7.2% to +16.0%, because that probability is
-  inflated by `scale_pos_weight`; weighted by an isotonic-calibrated
-  probability it helps both upper tiers (28.1% → 25.2%, 40.8% → 35.6%) and
-  costs the < €1M tier (20.6% → 21.1%). That's on 52 rows between €1M and
-  €1.95M and 19 above, too few to switch.
-
----
+- Routing is kept for the top tier, not for the average: it costs 0.3 point overall and 5 points between €1M and €1.95M, and cuts the luxury bias from -50.6% to -41.3%.
+- 0.9 is kept, not proven best: it was picked on an earlier validation split and only checked on the next one. With 21 luxury test rows, one property moves the tier's MAPE by about 5 points.
+- The switch is hard: two properties on either side of the threshold can differ by €1M. Probability blends were measured (`python -m scripts.evaluate_routing_blend`, validation split) and rejected: with the raw probability the top tier improves but the < €1M mean bias rises from +7.2% to +16.0%; with an isotonic-calibrated probability the gains do not hold on the half of the rows that played no part in the calibration.
 
 ## 5. The price range
 
-The standard segment returns a 10th to 90th percentile range from two quantile
-models. On the test split the raw models hold the real price 70.8% of the
-time, not 80% (README, bug #10).
+The standard segment returns a 10th to 90th percentile range from two quantile models. Raw, they hold the real price 70.8% of the time on the test split, not 80%. `train.py` applies conformalized quantile regression: on the standard-routed calibration rows it takes the finite-sample quantile of how far the real log price falls outside the raw range, and widens both bounds by that margin (+0.0542 in log price, bounds multiplied and divided by 1.056). The guarantee needs calibration rows that played no part in fitting the bounds, so the calibration split serves nothing else.
 
-`train.py` applies **conformalized quantile regression** (CQR):
-
-1. keep the calibration-split rows the API would give a range to (routed to
-   the standard model);
-2. compute for each row how far the real log-price falls outside the raw
-   range, and take the finite-sample quantile of those scores that gives 80%
-   coverage (`conformal_margin`);
-3. widen both bounds by that margin, and measure the coverage on the
-   standard-routed **test** rows.
-
-The guarantee needs the calibration rows to be exchangeable with new ones, so
-they must play no part in fitting the bounds. Until 2026-11-10 they were half
-of the validation split, which also early-stopped the quantile models, so it
-didn't strictly hold. The calibration split now serves nothing else.
-
-From `models/interval_calibration.json`:
-
-| | Value |
-|---|---:|
-| Calibration rows / test rows | 781 / 2,344 |
-| Log margin | +0.0542 (bounds × / ÷ 1.056) |
-| Coverage on the test split, raw | 70.8% |
-| Coverage on the test split, calibrated | 80.4% |
-
-Over 200 random re-draws of the calibration and test rows (same models), the
-coverage averages 80.2% (73.4% to 84.1%). No range is returned for the luxury
-segment: the quantile models describe the standard model's estimate, and 111
-rows are too few for a stable quantile fit.
-
----
+Coverage on the 2,344 standard-routed test rows: 70.8% raw, 80.4% calibrated; over 200 random re-draws of the calibration and test rows, 80.2% on average (73.4% to 84.1%). The luxury segment gets no range: 111 rows are too few for a stable quantile fit.
 
 ## 6. Evaluation: what the numbers mean
 
-All model figures are on the 2,361-row test split, which nothing was fitted,
-early-stopped, tuned or chosen on. The validation split did all of that, so
-its scores are optimistic and never published as a headline (README, bug #13).
-An earlier "holdout" (rows absent from `data/training_baseline.csv`) was worse:
-it still contained 3,938 of its 4,944 rows from the training split, which made
-MAPE look like 16.8% instead of 22.4% on the old validation split (README,
-bug #8).
-
-Standard model alone (`monitoring/metrics.py`): MAE €85,137, MAPE 20.28%,
-median APE 12.88%, R² 0.676 (euros), mean bias +3.44%, median bias −0.37%.
-By tier, MAPE is 19.77% below €1M, 26.20% between €1M and €1.95M, and 50.60%
-above €1.95M.
-
-Three listings are priced under €10,000 and are dropped from every split
-(`MIN_PLAUSIBLE_PRICE` in `src/train.py`): two were training rows, one was a
-77 m² Oostende apartment at €3,048 in the test split, a 9,430% error worth 4
-points of MAPE. It could not be removed for hurting the score, which is a
-choice made on the test split. It can be removed by a rule that reads the
-price alone and applies everywhere. `split_all()` drops the rows after the
-draw, so every other row keeps its split and the test split needs no new draw.
-
-MAPE is the headline because a buyer thinks in percent of the price, but it
-weights a €150k flat and a €3M villa equally. That is why every table is
-split by price tier, and why the routing decision is read off the top tier's
-bias rather than the overall MAPE.
-
-The mean bias and the median bias answer different questions. The mean of
-(estimate − price) / price is positive for a model that is too high as often
-as too low, because an estimate at twice the price weighs +100% and one at
-half the price −50%. Below €1M, as deployed, the mean is +5.1% and the median
-+0.3%. The mean comes from the 257 test listings under €150k (82% of them
-estimated above their price, median +22%); between €500k and €1M the
-estimates run low (median −10%). The model pulls prices towards
-the middle of the market, and "overestimated by 6%" described no typical
-listing. `evaluate_stratified.py` prints the mean, median and total bias per
-tier; the README has the table by price band.
-
----
+- All headline figures are test-split figures. An earlier "holdout" held most of the training rows and made the error look 6 points better than it was.
+- `python -m monitoring.metrics` scores the standard model alone (MAPE 20.28%, median 12.88%, MAE €85,137, R² 0.676). `python -m scripts.evaluate_stratified --test` scores what the API serves, routing included (20.6%). Say which one a figure is.
+- MAPE weights a €150k flat and a €3M villa equally, so every table is split by price tier.
+- Mean and median bias answer different questions: an estimate at twice the price weighs +100%, one at half the price -50%, so the mean is pulled up by cheap listings. Below €1M, estimates run high under €150k (82% above the asking price, median +22%) and low between €500k and €1M (median -10%).
+- 155 of the 2,361 test listings share an address with a training listing; on those the error is 10.7%, against 21.3% on the rest. The split is random by listing, not by address.
+- Handling missing values differently (left to XGBoost, an "unknown" state) moved the error below €1M by 0.2 point at most, so it was left alone.
 
 ## 7. Serving and deployment
 
-- **API:** FastAPI, pydantic validation, `/` health check and `/ping` for
-  UptimeRobot (it keeps Render's free tier from sleeping). Unknown categories
-  give 422 with the list of accepted values.
-- **UI:** Streamlit. Province and city sit outside `st.form` so the city list
-  follows the province. `api_is_awake()` pings at most once a minute, and the
-  predict timeout is 120 s because a sleeping Render instance took 83 s to
-  wake on 2026-11-06.
-- **Hosting:** API on Render, UI on Streamlit Community Cloud, both reading
-  `$PORT`. Locally, `docker-compose.yml` runs both, the UI reaching the API by
-  its service name (`API_URL=http://api:8000`). The Hugging Face Space
-  (`hf/space/`) runs both in one container instead, because a Space exposes a
-  single port: the API listens on localhost, the UI on 7860, and `start.sh`
-  waits for `/ping` before starting the UI so its cached health check does not
-  record the API as asleep while the models load. `API_DOCS_URL=""` hides the
-  docs link there, since the API is not reachable from outside. That Space is
-  built and run locally with Docker but not published: Hugging Face hosts
-  Docker Spaces for PRO accounts only.
-- **Pinned libraries:** the models are pickles, so `scikit-learn`, `xgboost` and
-  `category_encoders` are pinned to the versions they were pickled with. A
-  newer `category_encoders` makes every prediction fail (README, bug #3). Any
-  upgrade of those three means a retraining.
-- **Failure paths:** the routing threshold is read from
-  `models/luxury_threshold.json` with no fallback, so a missing file stops the
-  API at start-up rather than routing with a guessed value. An unexpected
-  error in `/predict` is logged with its traceback and answered with a generic
-  500, never the exception text. `build_year` is bounded by today's date, not
-  by a year written into the schema.
-- **Tests:** 129, offline, run by `.github/workflows/tests.yml` on every push
-  and pull request. They cover the vocabulary mapping, the real model's
-  behaviour (house ≠ apartment, province and condition move the price, the
-  luxury model is not constant), the conformal margin, the API contract and
-  its failure paths, and the UI through Streamlit's `AppTest` with the API
-  mocked.
+- **API:** FastAPI, `/ping` for UptimeRobot, which polls it so Render's free tier does not go to sleep ([screenshot](img/uptimeRobot.png)). The routing threshold is read from `models/luxury_threshold.json` with no fallback, so a missing file stops the service at start-up. A `/predict` failure is logged with its traceback and answered with a generic 500. `build_year` is bounded by today's date. `garden_m2` is deprecated and ignored: no model reads it, and it stays in the schema only so existing clients that send it still validate.
+- **UI:** Streamlit; province and city sit outside `st.form` so the city list follows the province. The predict timeout is 120 s because a sleeping Render instance took 83 s to wake.
+- **Hosting:** API on Render (a Python service, `uvicorn api.app:app --host 0.0.0.0 --port $PORT`), UI on Streamlit Community Cloud. Compose runs both, the UI reaching the API by service name. `hf/space/` runs both in one container for a Hugging Face Space (single port, API on localhost, `start.sh` waits for `/ping` before starting the UI); it is built locally but not published, since Hugging Face hosts Docker Spaces for PRO accounts only.
+- **Images:** the API image copies only `api/`, `src/`, `monitoring/` and `models/` and runs as a non-root user. The two Dockerfiles repeat their install layers on purpose: Render builds `api/Dockerfile` by path.
+- **Pinned libraries:** the models are pickles, so scikit-learn, xgboost and category_encoders match the versions they were pickled with (category_encoders 2.10 or later breaks every prediction). Upgrading any of the three means retraining.
+- **Imports:** modules are imported from the repository root (`api.app`, `src.features`) and run with `python -m`; pytest adds the root through `pyproject.toml`. Only `streamlit/app.py` edits `sys.path`, because `streamlit run` puts only `streamlit/` on it.
 
----
+## 8. Known gaps
 
-## 8. Open issues, by point of view
-
-These are found by reading the code. Each one is its own change.
-
-### Software engineering
-
-- **Prediction logs do not survive on Render** unless `PREDICTION_LOG_PATH`
-  points at a persistent disk: Render's free-tier filesystem is wiped on each
-  deploy and restart. The code side is done (JSON Lines, one appended line per
-  prediction under a lock, with the engineered features); the hosting side is
-  a configuration choice.
-- **Import paths by `sys.path` edits** in `api/app.py`, `api/predict.py` and
-  `streamlit/app.py`. They work, but they are why a stray
-  `streamlit/__init__.py` once shadowed the Streamlit library (README, bug #5).
-- **The training year is fixed, the calendar is not.** `CURRENT_YEAR = 2026`
-  in `src/features.py` is the reference year the models learned
-  `property_age` from, so it must stay put until a retraining. A property
-  built after 2026 is accepted but gets a negative age, a value the models
-  never saw.
-
-### Data science
-
-- **Reproducible on one machine, not across machines.** Retraining twice in the
-  same container gives identical models. The models trained on the Windows
-  workstation differed from the container's (standard and luxury regressors,
-  up to 0.4 in log price), because XGBoost's result depends on the CPU and
-  thread count it ran on. The committed models are now the ones trained in the
-  python:3.12 Linux image, the image the service is deployed with, so
-  `python src/train.py` run in that image reproduces them. The 2026-11-10
-  models were trained in python:3.12 with the pinned versions.
-- **Two scripts, two sets of figures.** `monitoring/metrics.py` scores the
-  standard model alone (20.28% MAPE overall); `scripts/evaluate_stratified.py
-  --test` scores what the API serves, routing included (20.6% overall). Below
-  €1M they nearly agree on the test split (€62,512 and €64,259 MAE), because
-  0.9 routes two of those 2,253 rows. The UI caption and the
-  README's limitations quote the second; the README's performance table quotes
-  the first. Both are right, as long as each figure says which one it is.
-- **Luxury rows are few.** 111 rows to fit a regressor and 21 to judge it:
-  every luxury figure has a wide uncertainty that a single number hides.
-
-### DRY
-
-- The two Dockerfiles repeat the same install layers. Kept on purpose: Render
-  builds `api/Dockerfile` by path, and a shared base image would add a build
-  step to save six lines.
-
-### GenAI
-
-There is no LLM in this service, and the core estimate should stay a tabular
-model: it is cheaper, deterministic and measurable. Where a single structured
-LLM call could add value, with schema validation and a fallback:
-
-- extracting surface, state or garage from a free-text listing description
-  into `PropertyInput`;
-- turning the response (segment, range, notes) into a plain-language
-  explanation, without letting it invent a number.
-
-### Strategy and business
-
-- **What it is for:** a first estimate for a buyer or a seller, not a
-  valuation. About 20% average error below €1M (≈ €64k as deployed) is useful to sort
-  listings, not to set a price; the app says so next to every estimate.
-- **Where it is weakest is where the money is.** Above €1.95M the error is
-  close to half the price (44.0% on the test split), mostly underestimation.
-- **The data ages.** One scrape, no refresh pipeline, and no real traffic has
-  been logged durably yet (see above). A product version needs a
-  scheduled re-scrape, retraining on a fixed cadence, and the same tier tables
-  re-run each time.
-- **Running cost is near zero** (free tiers), and the price of that is the
-  cold start: up to a minute for the first estimate after a pause.
-- **Scraped data:** reusing Immovlan listings commercially is a question for
-  the site's terms, not for the code.
+- `CURRENT_YEAR = 2026` in `src/features.py` is the year the models learned `property_age` from; it stays until a retraining. A property built after 2026 gets a negative age.
+- The data ages: one scrape, no refresh pipeline, no durable production log. Reusing Immovlan listings commercially is a question for the site's terms.
+- Luxury rows are few (111 to fit, 21 to judge), so every luxury figure has a wide uncertainty.

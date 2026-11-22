@@ -1,433 +1,86 @@
 # Decisions
 
-One dated entry per change that alters what a number means. Append, never rewrite.
+One entry per decision that still holds: date, what, why. When a later change replaces an earlier one, the entry carries the latest date and names the earlier one in a few words. Oldest first.
 
-## 2026-10-10: The state dictionaries are keyed the way the data spells the states
+## 2026-10-10: state dictionaries are keyed the way the data spells states
 
-- **What:** `ENERGY_MEAN_BY_STATE` and `STATE_MAPPING` in `src/features.py` are
-  keyed `"TO RENOVATE"`, `"FULLY RENOVATED"`, … (upper case, spaces), which is
-  how `models/categories.json` and the training rows spell them. Input with an
-  underscore or stray whitespace is folded into that spelling. `streamlit/app.py`
-  no longer rewrites spaces to underscores before the lookup.
-- **Why:** the keys carried underscores, which no row ever matched, so every
-  multi-word state fell through to `NORMAL`: ordinal 3 instead of 2 for
-  "TO RENOVATE", and 130 kWh instead of 180 where energy was missing. That
-  happened in training and at inference alike, so the models never saw the
-  distinction the dictionaries were meant to encode.
-- **What changes in the numbers:** `property_state_encoded` and the imputed
-  energy change for five of the eight states. The pickled models were fitted on
-  the old values, so they must be retrained before this ships:
-  `python src/train.py`, `python scripts/export_categories.py`, then the
-  README's metrics table re-measured with `python monitoring/metrics.py`.
-- **Revisit if:** a state appears in the data that is in neither dictionary
-  (`tests/test_predict.py::TestStateEncoding` fails on it).
-
-## 2026-10-11: the routing table follows the retrained models
-
-`scripts/evaluate_stratified.py` was re-run on the validation split (3,150 rows)
-with the models retrained after the state-key fix and committed in `bc8e6b1`.
-Every cell of the "Luxury Routing" table moved by a few tenths; the choice of
-0.9 holds for the same reason as before (the luxury tier falls from 46% to 35%
-MAPE while the < €1M tier moves 21.9% → 22.3%). One thing the new run states
-that the old table did not: against no routing, 0.9 costs 0.5 point of overall
-MAPE (22.3% → 22.8%). Routing is kept for the top tier, not for the average,
-and the README now says so. The routed counts are 83 / 40 / 23 at 0.7 / 0.9 /
-0.95 (were 80 / 42 / 24).
+`ENERGY_MEAN_BY_STATE` and `STATE_MAPPING` in `src/features.py` use `"TO RENOVATE"`, `"FULLY RENOVATED"` (upper case, spaces), as in `models/categories.json`. Input with an underscore or stray whitespace is folded into that spelling.
+Why: the old keys had underscores, matched no row, and sent every multi-word state to `NORMAL`, in training and at inference alike. Five of the eight states changed encoding, so all models were retrained.
+Revisit if a state appears in the data that is in neither dictionary (`tests/test_predict.py::TestStateEncoding` fails on it).
 
 ## 2026-10-11: a city typed in the other national language reaches the model
 
-The training data keeps one spelling per Belgian municipality (mostly the Dutch
-name in Flanders and Brussels, the French one in Wallonia, a few English ones).
-A user typing "Ixelles", "Luik" or "Gand" got "city not in the training data" and
-an estimate without the city, for cities the models know. `CITY_ALIASES` maps 80
-French/Dutch/English names to the spelling in `models/categories.json`; the
-user's province is still preferred when a target name exists in two provinces.
-
-Taken from the branch `merge/app-overhaul-into-main`, which fixed the state keys
-the other way (underscores) and could not be merged over the space-keyed fix
-already on main. Only the alias table, its lookup and its tests were ported.
-No model, metric or encoding changed. Tests: 36 -> 57 passed (the README said
-31; re-measured).
-
-
-## 2026-10-12: README accuracy figures name the pipeline they measure
-
-The "Known Limitations" accuracy line quoted the standard model alone
-(€68k below €1M, +5% overall bias, `monitoring/metrics.py`) while the UI
-caption quoted the deployed pipeline with routing at 0.9 (€70k, +7% below
-€1M, `scripts/evaluate_stratified.py`). Both scripts were re-run on 2026-10-12
-on the committed models, without retraining, and every published cell still
-matched. The limitations line and the conclusion now quote the deployed
-pipeline (22.8% overall, 22.3% and +6.6% below €1M, 34.9% above €1.9M); the
-conclusion said 22.9% / 22% / 34%. The bug #10 row now quotes the coverage in
-`models/interval_calibration.json` (70.7% -> 77.8%), as the interval paragraph
-already did; it said 70.4% -> 77.6%. No model or metric changed.
-
-## 2026-10-12: the drift report measures logged features against the training split
-
-- **What:** the prediction log is JSON Lines (`monitoring/logs.jsonl`, or
-  `PREDICTION_LOG_PATH`), one line appended per prediction, carrying the
-  engineered features the models read and a `source` ("api" or "synthetic").
-  `check_drift.py` compares those features with `train.py`'s training split
-  (12,596 rows), not `data/training_baseline.csv` (10,802 rows, not the
-  training split). `generate_logs.py` writes validation rows to its own file
-  and never deletes the real log.
-- **Why:** the API logged raw input without `property_state_encoded`, so a
-  report on real traffic raised KeyError (reproduced on the previous code with
-  60 API requests); the generator deleted the real log before writing; and the
-  README's table compared random values, including a state the model does not
-  know, with a baseline that was not the training data.
-- **What changes in the numbers:** the README's PSI table. It said 7 of 12
-  features drifted strongly; on 2,000 validation rows the tooling now reads
-  every feature as stable (PSI 0.0000-0.0146). Neither table says anything
-  about production, and the README says so. No model, metric or encoding
-  changed.
+The training data keeps one spelling per municipality. "Ixelles", "Luik" or "Gand" used to get "city not in the training data" and an estimate without the city. `CITY_ALIASES` maps 80 French, Dutch and English names to the training spelling; the user's province wins when a name exists in two provinces. No model or metric changed.
 
 ## 2026-10-12: "deterministic" means on one machine
 
-Retraining in a Linux container (xgboost 3.2.0, scikit-learn 1.9.0) twice, and
-with the previous and the refactored `train.py`, gave identical models each
-time. Against the committed models, the quantile models, the routing
-classifier, `luxury_threshold.json` and `interval_calibration.json` match
-exactly, but the standard and luxury regressors differ by up to 0.38 and 0.40
-in log price on the validation rows. The README said "two runs give identical
-models" without that condition; it now says "on a given machine". The
-committed models were not replaced: the published figures are theirs.
+Two retrains in the same Linux image give identical models. Against models retrained on another machine, the standard and luxury regressors differ by up to 0.40 in log price (XGBoost depends on CPU and thread count). So part of any metric move after a retrain is the machine. The committed models are trained in the `python:3.12` image with the pinned versions, and the docs say "on a given machine".
 
-## 2026-10-12: the clip bounds and the luxury price come from the training rows
+## 2026-10-12: the drift report measures logged features against the training split
 
-- **What:** `src/train.py::price_bounds()` takes the 1st and 99th percentiles of
-  the TRAINING prices; they set the clip of the standard and quantile models'
-  target and the luxury price (and so the routing labels and the luxury tier).
-  They were taken on all rows, validation included.
-- **Why:** the validation prices helped decide what the models were trained on
-  and how the luxury tier was cut, so the scores were not entirely out of
-  sample. Measured: the 99th percentile moves from €1,900,000 to €1,890,000 and
-  the 1st from €68,500 to €68,475.
-- **What changes in the numbers:** all five models were retrained (in the
-  python:3.12 Linux image, the deploy image) and every README and deep-dive
-  figure re-measured. Standard model: MAPE 22.34% -> 22.52%, bias +4.62% ->
-  +5.06%. As deployed (routing 0.9): 22.8% -> 23.0% overall, 22.3% -> 22.4%
-  below €1M, 34.9% -> 35.8% on the luxury tier, which now holds 36 rows (was
-  35). Retraining the PREVIOUS code in the same image gives 22.64% and 23.2%:
-  the threshold fix itself improves both figures; the rest of the move is the
-  machine (see the 2026-10-12 entry on determinism). The 0.9 routing threshold
-  still holds for the same reason. Range coverage on the check half: 77.9%,
-  80.1% on average over 200 halvings.
+The prediction log is JSON Lines (`monitoring/logs.jsonl`, or `PREDICTION_LOG_PATH`): one line per prediction with the engineered features the models read and a `source` ("api" or "synthetic"). `check_drift.py` compares them with `train.py`'s training split, not with `data/training_baseline.csv`, which is not the training split. `generate_logs.py` writes to its own file and never deletes the real log.
+Why: the API used to log raw input, so a report on real traffic raised KeyError, and the README's PSI table compared random values with the wrong baseline. On 2,000 validation rows every feature reads as stable. That says nothing about production.
 
-## 2026-11-08: a left-out bedroom count is missing, not 1
+## 2026-10-12: clip bounds and the luxury price come from the training rows
 
-- **What:** `api/app.py::PropertyInput.bedroom_count` defaults to `None`
-  instead of `1`. A request without it now reaches the pipeline as NaN and is
-  filled by the median imputer fitted in `src/train.py` (3 bedrooms).
-- **Why:** the schema promises that optional fields left out are imputed as in
-  training. Bedrooms were the exception: an API or CLI caller who skipped the
-  field got a one-bedroom price. Measured on the committed models, a 150 m²
-  Liège house went from €251,749 to €212,429 (-15.6%) and an 85 m² Elsene
-  apartment from €343,417 to €319,310 (-7.0%).
-- **What changes in the numbers:** only the price of requests that leave
-  `bedroom_count` out. A request that sends it, and every Streamlit request
-  (the UI always sends it), gets the same price as before. No model, metric or
-  README performance figure changes; no retraining.
-- **Revisit if:** the imputer strategy in `build_preprocessor()` changes.
+`src/train.py::price_bounds()` takes the 1st and 99th percentiles of the training prices only. They clip the standard and quantile targets and define the luxury price, so they also define the routing labels and the luxury tier. Taken on all rows, validation prices helped decide what the models trained on, and the scores were not fully out of sample.
+Current values: €69,000 to €1,949,050, 111 luxury training rows.
 
-## 2026-11-08: a column the caller leaves out is missing in add_features
+## 2026-11-10: a sealed test split
 
-- **What:** `src/features.py::add_features()` creates an absent
-  `bedroom_count`, `preschool_distance_m`, `train_station_distance_m` or
-  `supermarket_distance_m` column as missing (None) instead of 1 or 0. The
-  pipeline's median imputer then fills it.
-- **Why:** a distance of 0 m and one bedroom are real values, far from the
-  training medians (502 m, 2,000 m, 706 m, 3 bedrooms). The API always sends
-  these keys, so it never hit the defaults, but a direct `engine.predict()`
-  with the required fields alone did, and the Hugging Face model card shows
-  exactly that call. Measured on a 90 m² Ixelles apartment built in 2000: engine
-  €300,692, API €363,063 (-17.2%). After the fix both give €363,063.
-- **What changes in the numbers:** only direct engine calls that leave these
-  fields out. The training data has every column, so training, the committed
-  models and every published metric are unchanged; no retraining.
-- **Still open:** `build_year`. Left out, the API uses 2000, while
-  `add_features` fills a missing year with `CURRENT_YEAR` (age 0), as it did
-  for training rows. Which one is right is a modelling decision, not a typo.
+`src/train.py::split_all()` cuts the listings into four disjoint splits with `SPLIT_SEED = 42`: train 70% (fits everything), validation 10% (early stopping, the Optuna search, the routing threshold), calibration 5% (the range margin, nothing else), test 15% (sealed). Only the final figures read the test rows: `monitoring/metrics.py`, `scripts/evaluate_stratified.py --test` and the coverage in `models/interval_calibration.json`.
+Why: every earlier figure came from a split that also tuned the models, so "22.5% MAPE on unseen listings" was a validation score. The test rows were drawn from the old 80% training part, so no earlier choice was ever scored on them.
+Also from this retrain: `scale_pos_weight` is counted on training rows only (about 98); `src/optimize.py` is seeded; the 0.9 routing threshold is kept and checked, not re-tuned (it cuts the top tier's MAPE and costs 0.3 point overall).
+Revisit if a threshold or any setting gets chosen by reading the test split. Then the split is spent and needs new data or a new draw.
 
-## 2026-11-10: a sealed test split, and one rule for a missing build year
+## 2026-11-15: an optional field left out is missing, not a default
 
-- **What:** `src/train.py::split_all()` cuts the 15,746 listings into four
-  disjoint splits with `SPLIT_SEED = 42`: train 11,022 (70%, fits everything),
-  validation 1,575 (10%, early stopping, the Optuna search, checking the
-  routing threshold), calibration 787 (5%, the range's conformal margin,
-  nothing else) and test 2,362 (15%, sealed). Only the final figures read the
-  test rows: `monitoring/metrics.py`, `scripts/evaluate_stratified.py --test`
-  and the coverage in `models/interval_calibration.json`. `split()` still
-  returns (train, validation) for the scripts that need the training rows.
-- **Why:** every published figure came from the old 3,150-row validation split,
-  and that split also early-stopped the standard and quantile models, scored
-  the Optuna search and picked the 0.9 threshold. So "22.5% MAPE on 3,150
-  unseen listings" was a validation score, optimistic, not a test score. The
-  range had the same problem: its margin was set on half of those rows, which
-  the quantile models had early-stopped on, so the conformal guarantee didn't
-  strictly hold.
-- **Where the test rows come from:** the old 80% training split only. A fresh
-  15% drawn with the same seed would have been 2,362 of the old 3,150
-  validation rows, every one of them seen by the October threshold choice and
-  search. Drawn from the old 80%, no earlier choice was ever scored on them.
-- **Also fixed with this retraining:**
-  - A missing `build_year` stays missing in `add_features()` and at the API
-    (`PropertyInput.build_year` defaults to None). The median imputer fills
-    it with the training median, 1974. Before, training used the current
-    year (a new build) and the API sent 2000. A 150 m² Liège house without a
-    year is now €220,213.
-  - The classifier's `scale_pos_weight` is counted on the training rows only
-    (≈ 98). It was counted on all rows.
-  - `src/optimize.py` is seeded and was re-run on the new train and
-    validation splits (50 trials); its best parameters are in `train.py`.
-  - `monitoring/generate_logs.py` writes 1,500 validation rows by default,
-    since the split now has 1,575.
-- **What changes in the numbers:** all five models retrained in the
-  python:3.12 Linux image (pinned versions). The clip bounds and luxury price
-  moved with the training rows: €69,000 to €1,948,950 (was €68,475 to
-  €1,890,000), 111 luxury training rows (was 125).
-
-  | Figure | Before (old validation, 3,150 rows) | After (test, 2,362 rows) |
-  |---|---:|---:|
-  | Standard model MAPE | 22.52% | 26.24% (22.17% without row 5258) |
-  | Standard model median APE | not published | 14.85% |
-  | Standard model MAE | €92,685 | €92,024 |
-  | Standard model R² (euros) | 0.659 | 0.646 |
-  | Standard model bias | +5.06% | +7.88% (+3.79% without row 5258) |
-  | As deployed (0.9), overall MAPE | 23.0% | 26.5% (22.5% without it) |
-  | As deployed, R² (euros) | 0.663 | 0.617 |
-  | As deployed, < €1M MAPE | 22.4% | 26.0% (21.8% without it) |
-  | As deployed, < €1M bias | +7.1% | +9.9% (+5.6% without it) |
-  | As deployed, top tier MAPE | 35.8% (36 rows) | 46.2% (21 rows) |
-  | As deployed, top tier bias | −29% | −43.0% |
-  | Range coverage, raw to calibrated | 70.7% → 77.9% (1,555 rows) | 73.6% → 80.9% (2,344 rows) |
-  | Range median width | ≈ €213k | ≈ €213k |
-
-  Row 5258 is a 77 m² Oostende apartment listed at €3,048, a data error. The
-  model says €297,380, a 9,657% error, which alone adds 4 points to the MAPE
-  of 2,362 rows. It stays in the test split: dropping it after seeing the
-  score would be a choice made on the test. The cleaning should drop prices
-  like that; once it does, the test split has to be drawn again.
-
-  The top tier got worse (35.8% to 46.2%). The figures can't tell how much is
-  the old split flattering the old models and how much is noise: 21 rows, and
-  one property moves the tier's MAPE by about 5 points.
-
-  No README in this repo ever quoted an R² of 0.79. That figure comes from
-  `immoeliza_ml` (0.7956 for `models/XGBoost.py`, 0.7908 for the tuned
-  script), a different model on a different preprocessing.
-
-  77.8% or 77.9%: the 2026-10-12 entry on README figures quotes 77.8%, which
-  was right for the models committed at that time (0.7783). The retraining
-  later that day gave 0.7788, so 77.9% was the right figure for the models
-  replaced today.
-- **The threshold:** 0.9 is kept and checked, not re-tuned: the new
-  validation split has 19 rows above €1.95M. There, 0.9 cuts the top tier's
-  MAPE from 51.2% to 44.0% and costs 0.3 point below €1M. On the test split
-  it does the same (51.6% to 46.2% on the top tier, 0.3 point overall).
-- **Revisit if:** a threshold or any other setting gets chosen by looking at
-  `evaluate_stratified.py --test`. Then the test split is spent and needs a
-  new draw or new data.
+`bedroom_count`, `build_year`, `terrace`, `livable_surface` and the three distances default to missing in the API schema and in `add_features()`. The median imputer fitted in training fills them (3 bedrooms, build year 1974, terrace 1, distances 502 m, 2,000 m and 706 m). Garage and pool keep 0: no training row lacks them.
+Why: a default of 0 or 1 is a real value far from the medians. Measured on the models of the time: a 150 m² Liège house without bedrooms went from €251,749 to €212,429 (-15.6%); a direct `engine.predict()` without distances gave 17.2% less than the API; a missing terrace came out up to 13% lower through the API. Steps: bedrooms and distances on 2026-11-08, build year on 2026-11-10 (it was 2000 in the API and the current year in training), terrace on 2026-11-15.
+Check: replaying 364 test listings through `PropertyInput` and `engine.predict()` matched the scored pipeline on all of them.
 
 ## 2026-11-15: the models read the real energy consumption
 
-- **What:** `src/features.py::to_model_columns()` renames the data's
-  `energy_consumption_kWh/m2/year` to `energy_consumption_kWh_m2_year`, the
-  name the code reads, and raises if a model input has no column.
-  `load_dataset()` calls it. In `add_features()` a consumption of 0 or above
-  `MAX_ENERGY_KWH_M2_YEAR` (1,000) counts as not given, like a missing one,
-  and gets the figure for the property's state.
-- **Why:** the two names never matched, so `add_features()` created the column
-  at 0 and filled every training row from `ENERGY_MEAN_BY_STATE`. 12,841 of
-  15,746 listings give a consumption (median 264 kWh) and no model ever read
-  one. The feature was a second copy of the state, on a scale of 80 to 300.
-  At inference the user's real figure went into that scale. Measured on the
-  previous models, a 150 m² Liège house in normal state: €220,580 with the
-  field left out, €184,617 with 250 kWh (−16%), €281,964 with 60 kWh (+28%).
-  Same class of bug as the state keys of 2026-10-10: a spelling that matches
-  nothing and falls back without an error.
-- **The 1,000 kWh cap:** 218 values are above it (1.7% of those given), up to
-  20,260,607, which is a date. 56 are 0. The Streamlit form already stops at
-  1,000. An API request above 1,000 used to go to the models as it was; it now
-  counts as not given.
-- **The state table is rebuilt from the data.** `ENERGY_MEAN_BY_STATE` said
-  130 kWh for a normal state; the training listings in that state that give a
-  consumption have a median of 260. The table now holds those medians, rounded
-  to 10 (70 new, 180 excellent, 220 fully renovated, 260 normal, 420 to
-  renovate; 470 and 600 for "to restore" and "to demolish", which have 10
-  listings and 1 and only keep the order). With the old table a consumption
-  left out priced the house like a frugal one: €270,443 against €244,762 with
-  250 kWh, on the same Liège house. With the new one, €241,607 and €242,315.
-  In cross-validation the two tables score the same (21.26% and 21.27% below
-  €1M), so this changes what "unknown" means, not the accuracy.
-- **Proved before, measured after:** 5-fold cross-validation on the train and
-  validation rows (the test split not read), below €1M: MAPE 22.08% with the
-  column unread, 21.26% with it read and capped; median error 15.05% to
-  14.33%. Retrained with this fix alone, the test split gave 26.0% as deployed
-  (was 26.5%) and 21.3% below €1M without the €3,048 row (was 21.8%).
-- **Revisit if:** the cleaning step renames its columns, which
-  `to_model_columns()` now refuses instead of training on a default; or the
-  training data changes, since the table is computed from it by hand.
+`to_model_columns()` renames the data's `energy_consumption_kWh/m2/year` to the name the code reads and raises if a model input has no column. A consumption of 0 or above 1,000 kWh (`MAX_ENERGY_KWH_M2_YEAR`) counts as not given and gets the figure for the property's state.
+Why: the two names never matched, so the column was filled from the state for every row and no model read a consumption (12,841 of 15,746 listings give one). At inference a real 250 kWh cost 16%. 218 values are above 1,000, up to 20,260,607, which is a date.
+`ENERGY_MEAN_BY_STATE` is rebuilt from the data: medians rounded to 10 (70 new, 180 excellent, 220 fully renovated, 260 normal, 420 to renovate; 470 and 600 for "to restore" and "to demolish", which have 10 listings and 1 and only keep the order). With the old 130 kWh for a normal state, a consumption left out priced the house like a frugal one.
+Cross-validation below €1M: MAPE 22.08% with the column unread, 21.26% read and capped. The table change alone is neutral (21.26% against 21.27%): it changes what "unknown" means, not the accuracy.
+Revisit if the training data changes: the table is computed from it by hand.
 
 ## 2026-11-15: the models read the postcode
 
-- **What:** three inputs are added to `NUMERIC_FEATURES`: `postcode`,
-  `area_latitude` and `area_longitude`. The last two are the median
-  coordinates of the training listings in the request's postcode, or in its
-  city when the training rows have none there, or missing when they know
-  neither (`src/features.py::add_location`). `src/train.py` writes the
-  centroids to `models/locations.json` (937 postcodes, 1,533 cities) and the
-  API reads them. The file also holds each city's most common postcode, which
-  the Streamlit form now starts on instead of 1000.
-- **Why:** `postcode` was required by the API and the form, and no model read
-  it. The city reached the models as one target-encoded number, so they knew a
-  city's price level and nothing of where it is.
-- **Why centroids and not each listing's coordinates:** a request has a
-  postcode and a city, never coordinates. In cross-validation the postcode
-  centroid does as well as the exact coordinates (20.68% below €1M for both,
-  21.66% without location), and training on it means a postcode is the same
-  place at training and at inference.
-- **What changes in the numbers:** every price. The same Liège house is
-  €241,607 in postcode 4000 and €229,781 in 4020. About 1% of the test
-  listings carry a postcode the training rows don't have; they get the city's
-  centroid and the response says so. Drift is now watched on 15 features.
-- **Revisit if:** the UI lets a user pick a city and keep another city's
-  postcode. The postcode wins, which is right when it is right.
+`postcode`, `area_latitude` and `area_longitude` are model inputs. The coordinates are the median of the training listings in the postcode, else in the city, else missing (`src/features.py::add_location`). `src/train.py` writes them to `models/locations.json`, filed by province because nine city names exist in two provinces. The file also holds each city's most common postcode, which the form starts on.
+Why: `postcode` was required by the API and read by nothing. A request carries no coordinates, and in cross-validation the postcode centroid does as well as exact coordinates (20.68% below €1M for both, 21.66% without location). It also makes a postcode the same place in training and at inference.
+Every price changes: the same Liège house is €241,607 in postcode 4000 and €229,781 in 4020. About 1% of test listings carry a postcode the training rows lack; they get the city's centroid and the response says so.
 
 ## 2026-11-15: asking prices under €10,000 are dropped, from every split
 
-- **What:** `src/train.py::MIN_PLAUSIBLE_PRICE = 10_000`. `split_all()` drops
-  the rows below it after drawing the splits. Three rows go: a 209 m² house
-  in Arlon at €2,500 and a house in Boncelles at €5,000 (both training rows),
-  and the 77 m² Oostende apartment at €3,048 (test row 5258). The next price
-  up is €19,900. Train is 11,020 rows (was 11,022), test 2,361 (was 2,362).
-- **This reverses part of the 2026-11-10 entry**, which kept row 5258 in the
-  test split and said the split would need a new draw once the cleaning
-  dropped it. What that entry refused was removing a row because it hurt the
-  score. This rule reads the price alone and applies to training rows too.
-  And no new draw is needed: the rows are dropped after the draw, so every
-  other row stays in its split and no row that served early stopping or
-  tuning can move into the test split. A filter before the draw would
-  reshuffle all of them.
-- **What is not clean about it:** the rule was written because of a row seen
-  in the test split. The bound was then set from the price distribution of
-  all listings (three rows under €10,000, a gap up to €19,900), not from any
-  model's error. Published figures no longer carry a "without one bad row"
-  variant; the comparison below gives both.
-- **Revisit if:** the upstream cleaning starts dropping these rows itself.
-  Then the constant does nothing and can go.
+`MIN_PLAUSIBLE_PRICE = 10_000` in `src/train.py`; `split_all()` drops those rows after drawing the splits. Three rows go (a house at €2,500, a house at €5,000, and a 77 m² Oostende apartment at €3,048); the next price up is €19,900.
+Why after the draw: every other row keeps its split, so no row used for tuning can move into the test split. The rule reads the price alone, never a model's error. It was written after seeing the €3,048 row in the test split, and the bound comes from the price distribution, not from the score.
+Revisit if the upstream cleaning drops these rows itself. Then the constant does nothing and can go.
 
-## 2026-11-15: the figures after the three changes above
+## 2026-11-15: what the published figures mean
 
-`src/optimize.py` was re-run on the final features (50 seeded trials,
-validation log-MAE 0.2050 → 0.1890; parameters in `train.py`) and all five
-models retrained in the python:3.12 Linux image with the pinned versions. The
-clip bounds are €69,000 to €1,949,050 (was €1,948,950), still 111 luxury
-training rows. The 0.9 threshold is kept, checked on validation as before:
-it cuts the top tier's MAPE from 50.5% to 40.8% and costs 0.2 point below €1M.
+The figures are test-split figures, 2,361 rows: standard model MAPE 20.28%, median 12.88%, MAE €85,137, R² 0.676; as deployed with routing at 0.9, 20.6% overall, 19.9% below €1M, 44.0% on the top tier; range coverage 70.8% raw, 80.4% calibrated. `monitoring/metrics.py` scores the standard model alone, `scripts/evaluate_stratified.py --test` scores what the API serves. Say which one a figure is.
+Of the 5.9 points of overall MAPE gained since 2026-11-10, 4 are the €3,048 row leaving and about 2 are the models.
+The test split was read three times that day (energy, postcode and price rule, state table). Each change was chosen on train and validation first, and none was kept or dropped for its test score: the state table reads 0.2 point worse and was kept for what it means.
+Measured and not done: leaving missing values to XGBoost, an "unknown" state category or a count of missing fields moved the cross-validated error below €1M by 0.2 point at most.
 
-| Figure (test split) | Before (2,362 rows) | After (2,361 rows) |
-|---|---:|---:|
-| Standard model MAPE | 26.24% (22.17% without row 5258) | 20.28% |
-| Standard model median APE | 14.85% | 12.88% |
-| Standard model MAE | €92,024 | €85,137 |
-| Standard model R² (euros) | 0.646 | 0.676 |
-| Standard model mean bias | +7.88% (+3.79%) | +3.44% |
-| As deployed (0.9), overall MAPE | 26.5% (22.5%) | 20.6% |
-| As deployed, < €1M MAPE | 26.0% (21.8%) | 19.9% |
-| As deployed, < €1M MAE | €69,601 | €64,259 |
-| As deployed, €1M to €1.95M MAPE | 34.7% | 31.1% |
-| As deployed, top tier MAPE | 46.2% | 44.0% |
-| As deployed, R² (euros) | 0.617 | 0.640 |
-| Range coverage, raw to calibrated | 73.6% → 80.9% (2,344 rows) | 70.8% → 80.4% (2,344 rows) |
-| Range median width | ≈ €213k | ≈ €192k |
+## 2026-11-15: bias is published as a median and by price band
 
-Of the 5.9 points of overall MAPE, 4 are the €3,048 row leaving and about 2
-are the models (22.5% → 20.6% on the same rows).
+The UI caption, README and model card no longer say prices below €1M are overestimated by about 6%. That was the mean of (estimate - price) / price, which is positive for a model that is too high as often as too low: twice the price weighs +100%, half the price -50%. Below €1M, as deployed, the mean is +5.1%, the median +0.3%, and the estimates sum to 1.6% under the prices. The median bias is +22.4% under €150k (82% of 257 rows estimated above their price), +4.3% from €150k to €250k, -1.4% from €250k to €500k and -9.8% from €500k to €1M. `evaluate_stratified.py` prints mean, median and total bias per tier; the mean is still published, named "mean bias".
 
-The test split was read three times today, after the energy fix, after the
-postcode and the price rule, and after the state table. Each change was
-chosen on train and validation first, and none was kept or dropped for its
-test score: the state table reads 0.2 point worse on the test (20.4% → 20.6%)
-and was kept for what it means. Three readings is still more than one, so the
-figures are a little less sealed than on 2026-11-10.
+## 2026-11-15: the same building can sit on both sides of the split
 
-Measured and not done: leaving missing values to XGBoost, an "unknown" state
-category and a count of missing fields each moved the cross-validated error
-below €1M by 0.2 point at most (21.66% → 21.42% at best), and none changed
-the error on listings under €150k.
+155 of the 2,361 test listings share their address with a training listing, and 27 are exact twins. As deployed the error is 10.7% on those and 21.3% on the other 2,206, against 20.6% on all rows. The published figures are right for a listing drawn like the data; for a building the models never saw they are about 0.7 point optimistic. The README says so. A split grouped by address would fix it and needs a new test split, which is a design decision.
 
-## 2026-11-15: "overestimated by 6%" is replaced by the median and the price bands
+## 2026-11-22: audit pass
 
-- **What:** the UI caption, the README limitations and the model card no
-  longer say that prices below €1M are overestimated by about 6%. They give
-  the median error and say where estimates run high and where they run low.
-  `scripts/evaluate_stratified.py` prints three readings per tier (mean bias,
-  median bias, total bias) and `monitoring/metrics.py` prints the median
-  signed error. The mean bias is still computed and still published, under
-  the name "mean bias".
-- **Why:** the +6% was the mean of (estimate − price) / price. That mean is
-  positive for a model that is too high as often as too low: twice the price
-  weighs +100%, half the price −50%. On the test split below €1M, as deployed,
-  the mean is +5.1%, the median +0.3%, and the sum of the estimates is 1.6%
-  under the sum of the prices. By price band the median bias is +22.4% under
-  €150k (257 rows, 82% estimated above their price), +4.3% from €150k to
-  €250k, −1.4% from €250k to €500k and −9.8% from €500k to €1M. A reader with
-  a €400k house was told the estimate ran 6% high when it runs slightly low.
-- **What changes in the numbers:** none of the models' outputs. The sentence
-  users read changes meaning: from one average to a median and a direction per
-  price band.
-- **Still true after today's fixes:** the pull towards the middle of the
-  market. Listings under €150k are estimated 22% too high at the median.
-  Nothing in the inputs tells a ruin or a share from a house.
-
-## 2026-11-15: audit of the day's changes, two fixes and one caveat
-
-Checks run on `main` after PR #27, and what they gave:
-
-- **Splits:** four disjoint splits, 11,020 / 1,575 / 787 / 2,361, the three
-  rows under €10,000 gone, no test row in the old validation split.
-- **Leakage:** `models/locations.json` equals the centroids of the training
-  rows alone, and differs from centroids built on all rows.
-- **Reproducibility:** `src/train.py` run from scratch in the python:3.12
-  image gives the five committed models with a maximum difference of 0.0 on
-  every row, and the same `interval_calibration.json`, `luxury_threshold.json`
-  and `categories.json`. `evaluate_stratified.py --test` and
-  `monitoring/metrics.py` print the published figures.
-- **Train/serve parity:** 400 test listings replayed through `PropertyInput`
-  and `engine.predict()`, against the pipeline that is scored. 36 can't be
-  sent (33 have no livable surface, 3 a build year the schema refuses: 1650,
-  2027, 2028). Of the 364 others, 340 matched to the last digit and 24 did
-  not. See the first fix.
-- **Deployment:** the Render API returns the retrained models' prices
-  (€241,607.50 for the Liège house in 4000, €229,781.33 in 4020).
-
-**Fix 1, a left-out terrace is missing, not 0.** `PropertyInput.terrace`
-defaulted to 0 while a training listing that doesn't say (5.7% of them) was
-imputed with the median, 1. The 24 listings above came out up to 13% lower
-through the API (4.5% at the median). It now defaults to None, and
-`add_features()` fills an absent `terrace` or `livable_surface` with missing
-instead of 0. What changes: only requests that leave `terrace` out (€236,847
-before, €241,607 after, on the Liège house). The UI and any request that
-sends the field are unchanged. After the fix the replay matches on all 364.
-Garage and pool keep 0: no training row lacks them.
-
-**Fix 2, cities are filed under their province in `locations.json`.** Nine
-city names exist in two provinces. Filed by name alone, each pair shared one
-centroid and one usual postcode, so the form started Antwerp's Vorst on 1190
-and Flemish Brabant's Deurne on 2100. The file now has 1,542 city entries
-under 11 provinces (was 1,533 names; the 2026-11-15 postcode entry quotes
-that count). No model or metric changed: a training row always finds its own
-postcode's centroid, so the city entry is only read for a postcode the
-training rows don't have, and the retraining above was run with this fix in.
-
-**Caveat, not fixed: the same building on both sides of the split.** 155 test
-listings share their address with a training listing, and 27 are exact twins
-(same coordinates, price, surface and bedrooms). As deployed the error is
-10.7% on the 155 and 21.3% on the 2,206 others (20.6% below €1M), against
-20.6% and 19.9% published on all test rows. The published figures are right
-for a listing drawn like the data; for a building the models never saw they
-are about 0.7 point optimistic. The README limitations now say so. A split
-grouped by address would fix it and would mean a new test split, which is a
-design decision.
+No model and no published figure changed.
+- `luxury_model_available` is read. `src/train.py` wrote the flag and nothing read it, so a run with fewer than 20 luxury rows would have left the old luxury model in place and still routed to it. `api.predict.load_routing_threshold()` now returns an infinite threshold when the flag is false. The committed models (111 luxury rows) behave as before.
+- The luxury price prints as €1.95M in the tier labels (it printed €1.9M for €1,949,050). `STRONG_PSI` is defined once, in `monitoring/monitor.py`, and `evaluate_routing_blend.py` takes the deployed threshold from `src/train.py`.
+- `garden_m2` is deprecated and ignored: no model reads it. It stays in the schema so existing clients still validate.
+- Modules are imported from the repository root and run with `python -m`; pytest and ruff are configured in `pyproject.toml`. Only `streamlit/app.py` edits `sys.path`, because `streamlit run` puts only `streamlit/` on it. `api.app` reads `PORT`.
+- Requirements are pinned, with `requirements-dev.txt` for tests and lint. `python-dotenv` is gone: nothing imports it.
+- The API image copies only `api/`, `src/`, `monitoring/` and `models/` and runs as a non-root user. Publishing fails on a CRITICAL CVE that has a fix (Trivy).
+- The docs were cut to what a reader needs.
