@@ -1,0 +1,27 @@
+# Tooling config only: the project is run from the repository root, not installed.
+# Modules are imported as `api.app`, `src.features`, `monitoring.monitor` and
+# started with `python -m` (see the README), so no sys.path edits are needed.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["data", "models"]
+
+[tool.ruff.lint]
+# pyflakes, pycodestyle, import order, pyupgrade, bugbear.
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = [
+    "E501",  # long lines: some are messages and docstrings
+    "UP045", # Optional[int] is the style used in the Pydantic schema
+    "UP007",
+    "B905",  # zip() without strict=: every call zips equal-length columns
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Streamlit runs the script with only streamlit/ on sys.path, so the repo root is added first.
+"streamlit/app.py" = ["E402"]
