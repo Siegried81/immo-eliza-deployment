@@ -3,13 +3,10 @@ scripts/publish_hf.py: what each Hub repo receives, and that a dry run sends not
 
 The Hub client is replaced by a recorder, so no test makes a network call.
 """
-import sys
-from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-import publish_hf  # noqa: E402
+from scripts import publish_hf
 
 RUNTIME_MODELS = {"pipeline.joblib", "pipeline_luxury.joblib", "luxury_classifier.joblib",
                   "pipeline_lower.joblib", "pipeline_upper.joblib", "luxury_threshold.json",

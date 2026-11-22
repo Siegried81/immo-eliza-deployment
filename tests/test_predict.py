@@ -15,8 +15,7 @@ from fastapi.testclient import TestClient
 import api.app
 from api.app import app
 from api.predict import MODEL_DIR, engine
-from src.features import (CITY_ALIASES, NUMERIC_FEATURES, load_vocabulary,
-                          to_training_vocabulary)
+from src.features import CITY_ALIASES, NUMERIC_FEATURES, load_vocabulary, to_training_vocabulary
 from src.train import conformal_margin
 
 client = TestClient(app)

@@ -6,20 +6,16 @@ through api.predict.engine, picks the segment with the routing threshold from
 models/luxury_threshold.json and logs every prediction for drift monitoring.
 """
 import logging
-import sys
+import os
 from datetime import date
-from pathlib import Path
-
-import uvicorn
-from fastapi import FastAPI, HTTPException, status
-from pydantic import BaseModel, Field, field_validator
 from typing import Literal, Optional
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-sys.path.append(str(BASE_DIR))
+import uvicorn
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field, field_validator
 
-from monitoring.monitor import log_prediction
 from api.predict import THRESHOLD_PATH, engine, load_routing_threshold, route
+from monitoring.monitor import log_prediction
 
 logger = logging.getLogger(__name__)
 

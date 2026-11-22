@@ -9,16 +9,10 @@ which for plot surface, bedrooms and distances is "missing", imputed as in
 training: a 0 there is a value the models never saw.
 
 Run:
-    python scripts/predict_cli.py
+    python -m scripts.predict_cli
 """
-import sys
-from pathlib import Path
-
-BASE_DIR = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(BASE_DIR))
-
-from api.app import PropertyInput  # noqa: E402
-from api.predict import THRESHOLD_PATH, engine, load_routing_threshold, route  # noqa: E402
+from api.app import PropertyInput
+from api.predict import THRESHOLD_PATH, engine, load_routing_threshold, route
 
 # (key, prompt, required). Order is the order of the questions.
 FIELDS = [

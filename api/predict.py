@@ -1,16 +1,22 @@
 import json
-import sys
-import joblib
-import pandas as pd
-import numpy as np
 from pathlib import Path
+
+import joblib
+import numpy as np
+import pandas as pd
+
+from src.features import (
+    CATEGORICAL_FEATURES,
+    NUMERIC_FEATURES,
+    add_features,
+    add_location,
+    load_locations,
+    load_vocabulary,
+    to_training_vocabulary,
+)
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 MODEL_DIR = BASE_DIR / "models"
-sys.path.append(str(BASE_DIR / "src"))
-
-from src.features import (CATEGORICAL_FEATURES, NUMERIC_FEATURES, add_features, add_location,
-                          load_locations, load_vocabulary, to_training_vocabulary)
 
 THRESHOLD_PATH = MODEL_DIR / "luxury_threshold.json"
 

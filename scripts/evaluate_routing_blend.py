@@ -12,23 +12,21 @@ half and judged on the other, which played no part in it.
 Read-only: it loads the committed models and writes nothing.
 
 Run:
-    python scripts/evaluate_routing_blend.py
+    python -m scripts.evaluate_routing_blend
 """
 import json
-import sys
 from pathlib import Path
 
 import joblib
 import numpy as np
+from sklearn.model_selection import train_test_split
+
+from src.train import DEFAULT_ROUTING_THRESHOLD, SPLIT_SEED, TARGET, load_dataset, price_tiers, split
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(BASE_DIR / "src"))
-from sklearn.model_selection import train_test_split  # noqa: E402
-
-from train import SPLIT_SEED, TARGET, load_dataset, price_tiers, split  # noqa: E402
 
 MODEL_DIR = BASE_DIR / "models"
-DEPLOYED_THRESHOLD = 0.9
+DEPLOYED_THRESHOLD = DEFAULT_ROUTING_THRESHOLD
 
 
 def blend(standard_log, luxury_log, proba):

@@ -13,7 +13,7 @@ and restart, and a log that does not survive cannot be monitored.
 import json
 import os
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -43,7 +43,7 @@ def log_prediction(input_data: dict, prediction: float, features: dict | None = 
     is printed.
     """
     entry = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "source": source,
         "input": input_data,
         "features": features or {},

@@ -9,12 +9,12 @@ hand, so a search never changes the shipped model on its own.
 
 Run (optuna is not a runtime dependency):
     pip install optuna
-    python src/optimize.py
+    python -m src.optimize
 """
 import numpy as np
 from xgboost import XGBRegressor
 
-from train import TARGET, build_preprocessor, clipped_log_target, load_dataset, price_bounds, split
+from src.train import TARGET, build_preprocessor, clipped_log_target, load_dataset, price_bounds, split
 
 
 def prepare():

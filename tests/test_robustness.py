@@ -11,8 +11,13 @@ from fastapi.testclient import TestClient
 
 import api.app
 from api.app import app
-from src.train import (DEFAULT_ROUTING_THRESHOLD, LUXURY_THRESHOLD_PATH,
-                       QUANTILE_LOWER, QUANTILE_UPPER, quantile_regressor)
+from src.train import (
+    DEFAULT_ROUTING_THRESHOLD,
+    LUXURY_THRESHOLD_PATH,
+    QUANTILE_LOWER,
+    QUANTILE_UPPER,
+    quantile_regressor,
+)
 
 client = TestClient(app)
 
@@ -85,6 +90,7 @@ class TestQuantileRegressor:
 
     def test_committed_models_match_that_configuration(self):
         import joblib
+
         from api.predict import MODEL_DIR
         for alpha, name in [(QUANTILE_LOWER, "pipeline_lower.joblib"),
                             (QUANTILE_UPPER, "pipeline_upper.joblib")]:
@@ -103,6 +109,7 @@ class TestOmittedBedroomCount:
 
     def test_omitted_bedroom_count_is_priced_at_the_training_median(self):
         import joblib
+
         from api.predict import MODEL_DIR
         from src.features import NUMERIC_FEATURES
 
