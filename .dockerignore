@@ -15,7 +15,6 @@ data
 tests
 docs
 scripts
-hf
 .github
 *.md
 monitoring/logs.json

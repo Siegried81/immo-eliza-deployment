@@ -8,7 +8,6 @@ XGBoost pipelines behind a FastAPI service, a Streamlit form in front, Docker im
 
 - Web app: https://immo-eliza-deployment-sieg.streamlit.app
 - API (Render, free tier, sleeps when idle: the first call can take a minute): https://immo-eliza-deployment-j8av.onrender.com/docs
-- Models: https://huggingface.co/Siegried81/immo-eliza-price-models
 - Docker Hub: [`siegried/immo-eliza-api`](https://hub.docker.com/r/siegried/immo-eliza-api), [`siegried/immo-eliza-ui`](https://hub.docker.com/r/siegried/immo-eliza-ui)
 
 How it works, why, and what is still weak: [docs/technical_deep_dive.md](docs/technical_deep_dive.md). Dated decisions that changed what a number means: [docs/decisions.md](docs/decisions.md).
@@ -36,7 +35,7 @@ python -m scripts.evaluate_stratified --test # deployed pipeline on the sealed t
 python -m monitoring.metrics                 # standard model alone, per price tier
 ```
 
-Other tools: `scripts.evaluate_routing_blend` (threshold vs probability blends), `scripts.predict_cli` (terminal predictions through the API's schema and routing), `scripts.publish_hf` (Hugging Face upload, dry run unless `--push`), `monitoring.generate_logs` then `monitoring.check_drift monitoring/synthetic_logs.jsonl` (drift report on synthetic traffic).
+Other tools: `scripts.evaluate_routing_blend` (threshold vs probability blends), `scripts.predict_cli` (terminal predictions through the API's schema and routing), `monitoring.generate_logs` then `monitoring.check_drift monitoring/synthetic_logs.jsonl` (drift report on synthetic traffic).
 
 ## API
 
@@ -61,7 +60,6 @@ src/          features.py (one feature pipeline for training and serving), train
 models/       the five pickled pipelines and their JSON companions (threshold, calibration, categories, locations)
 monitoring/   prediction log, PSI drift report, test-split metrics
 scripts/      evaluation, export and publishing tools
-hf/           Hugging Face model card and Space files
 docs/         technical deep dive, README screenshots
 tests/        offline pytest suite
 ```

@@ -163,7 +163,7 @@ def test_docs_link_follows_the_api_url(api, monkeypatch):
 
 
 def test_empty_docs_url_hides_the_link(api, monkeypatch):
-    """The Space sets API_DOCS_URL to "": its API only listens on localhost."""
+    """An API that only listens on the UI's localhost sets API_DOCS_URL to ""."""
     monkeypatch.setenv("API_DOCS_URL", "")
     at = run_app()
     assert not any("API documentation" in m.value for m in at.markdown)
