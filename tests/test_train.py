@@ -94,6 +94,14 @@ def test_luxury_model_learns_unclipped_prices_and_bounds_come_from_training_rows
     assert standard_target.max() <= config["luxury_price_threshold"] * (1 + 1e-9)
 
 
+def test_training_writes_the_likely_band(run_training, tmp_path):
+    run_training(1500)
+    calibration = json.loads((tmp_path / "interval_calibration.json").read_text())
+    assert calibration["likely_coverage"] == 0.5
+    assert calibration["likely_log_low"] < 0 < calibration["likely_log_high"]
+    assert 0.3 < calibration["likely_check_coverage"] < 0.7
+
+
 def test_too_few_luxury_rows_records_that_no_luxury_model_exists(run_training):
     _, config = run_training(600)  # about 4 training rows above the 99th percentile
     assert config["luxury_model_available"] is False

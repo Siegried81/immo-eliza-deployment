@@ -59,7 +59,8 @@ CSS = """
 .badge-standard { background: #e3f1ec; color: #1f6f5c; }
 .badge-luxury { background: #f6ead7; color: #8a5a12; }
 .range { position: relative; height: 10px; background: #e7ece9; border-radius: 6px; margin: 1.6rem 0 .4rem; }
-.range-fill { position: absolute; height: 100%; background: #9ccfbf; border-radius: 6px; }
+.range-fill { position: absolute; height: 100%; background: #c9e6dc; border-radius: 6px; }
+.range-likely { position: absolute; height: 100%; background: #5fae96; border-radius: 6px; }
 .range-marker { position: absolute; top: -5px; width: 4px; height: 20px; background: #1f6f5c; border-radius: 2px; }
 .range-labels { display: flex; justify-content: space-between; color: #5b6b66; font-size: .8rem; }
 </style>
@@ -125,20 +126,30 @@ def request_estimate(payload: dict) -> tuple[dict | None, str | None]:
     return None, f"The API returned an error ({response.status_code}). Please try again later."
 
 
-def range_bar(lower: float, prediction: float, upper: float) -> str:
+def range_bar(lower: float, prediction: float, upper: float, likely: dict | None = None) -> str:
     """
-    HTML bar of the 10th-90th percentile interval with a marker at the estimate.
+    HTML bar of the 80% range (10th-90th percentile), with the one-in-two band
+    drawn darker inside it and a marker at the estimate.
 
-    The aria-label carries the three prices, since a screen reader gets nothing
-    from the coloured bar itself.
+    The wide range alone reads as "the model knows nothing"; the darker band
+    shows where the price usually lands, while the light one keeps the honest
+    8-in-10 width. The aria-label carries the prices, since a screen reader
+    gets nothing from the coloured bar itself.
     """
     low, high = min(lower, prediction), max(upper, prediction)
     span = (high - low) or 1
-    left = (lower - low) / span * 100
-    width = (upper - lower) / span * 100
+
+    def segment(css: str, start: float, end: float) -> str:
+        return (f'<div class="{css}" style="left:{(start - low) / span * 100:.1f}%;'
+                f'width:{(end - start) / span * 100:.1f}%"></div>')
+
     marker = (prediction - low) / span * 100
-    label = f"Likely range from {euro(lower)} to {euro(upper)}, estimate {euro(prediction)}"
-    return (f'<div class="range" role="img" aria-label="{label}"><div class="range-fill" style="left:{left:.1f}%;width:{width:.1f}%"></div>'
+    label = f"Estimate {euro(prediction)}, wider range from {euro(lower)} to {euro(upper)}"
+    inner = ""
+    if likely:
+        label += f", most likely from {euro(likely['lower'])} to {euro(likely['upper'])}"
+        inner = segment("range-likely", likely["lower"], likely["upper"])
+    return (f'<div class="range" role="img" aria-label="{label}">{segment("range-fill", lower, upper)}{inner}'
             f'<div class="range-marker" style="left:calc({marker:.1f}% - 2px)"></div></div>'
             f'<div class="range-labels"><span>{euro(lower)}</span><span>{euro(upper)}</span></div>')
 
@@ -156,11 +167,17 @@ def show_result(result: dict, livable_surface: int) -> None:
     interval = result.get("prediction_interval")
     range_html = ""
     if interval:
-        range_html = (range_bar(interval["lower"], result["prediction"], interval["upper"])
-                      + "<div class='price-label' style='margin-top:.3rem'>"
-                        "Likely range "
-                        f"({spread(interval['lower'], result['prediction'], interval['upper'])}): "
-                        "calibrated to hold the real price for 8 listings in 10</div>")
+        likely = result.get("likely_range")
+        price = result["prediction"]
+        range_html = range_bar(interval["lower"], price, interval["upper"], likely)
+        if likely:
+            range_html += ("<div class='price-label' style='margin-top:.3rem'>"
+                           f"<b>Most likely</b> {euro(likely['lower'])} to {euro(likely['upper'])} "
+                           f"({spread(likely['lower'], price, likely['upper'])}): the real price "
+                           "lands here 1 time in 2</div>")
+        range_html += ("<div class='price-label'>"
+                       f"Wider range ({spread(interval['lower'], price, interval['upper'])}): "
+                       "calibrated to hold the real price for 8 listings in 10</div>")
     st.markdown(
         f"<div class='price-card'><div class='price-label'>Estimated price {badge}</div>"
         f"<div class='price-value'>{euro(result['prediction'])}</div>{range_html}</div>",
@@ -169,7 +186,7 @@ def show_result(result: dict, livable_surface: int) -> None:
 
     col1, col2 = st.columns(2)
     col1.metric("Price per m² (livable)", euro(result["prediction"] / livable_surface))
-    col2.metric("Chance it is a €1.95M+ property", f"{result.get('luxury_probability', 0):.0%}",
+    col2.metric("Chance of €1.95M+", f"{result.get('luxury_probability', 0):.0%}",
                 help="From the routing classifier. From 90% on, the luxury model prices the property.")
 
     if segment == "luxury":

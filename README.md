@@ -45,11 +45,12 @@ curl -X POST http://localhost:8008/predict -H "Content-Type: application/json" \
 ```
 
 ```json
-{"prediction": 241483.8, "prediction_interval": {"lower": 165809.59, "upper": 444402.41}, "currency": "EUR",
+{"prediction": 241483.8, "prediction_interval": {"lower": 165809.59, "upper": 444402.41},
+ "likely_range": {"lower": 212147.39, "upper": 276743.37}, "currency": "EUR",
  "status": "success", "segment": "standard", "luxury_probability": 0.024, "notes": []}
 ```
 
-Required: `postcode`, `province`, `city`, `property_type` (`HOUSE` or `APARTMENT`), `livable_surface`. Every other field is optional, and a field left out is treated as missing, as in training, never as 0. Categories are accepted in French, Dutch or English, in any case. An unknown province or type gives a 422; an unknown city is accepted and reported in `notes`. `prediction_interval` is null for the luxury segment. `GET /ping` is the liveness probe.
+Required: `postcode`, `province`, `city`, `property_type` (`HOUSE` or `APARTMENT`), `livable_surface`. Every other field is optional, and a field left out is treated as missing, as in training, never as 0. Categories are accepted in French, Dutch or English, in any case. An unknown province or type gives a 422; an unknown city is accepted and reported in `notes`. `prediction_interval` is the range that holds the price 8 times in 10, `likely_range` the narrower one that holds it 1 time in 2; both are null for the luxury segment. `GET /ping` is the liveness probe.
 
 ## Structure
 
@@ -78,7 +79,7 @@ tests/        offline pytest suite
 
 ## Prediction Examples
 
-- House, 150 m², Liège 4000, normal condition, form defaults otherwise: €238,354 from the standard model, range €156,205 to €405,541 (screenshot at the top).
+- House, 150 m², Liège 4000, normal condition, form defaults otherwise: €238,354 from the standard model, most likely €209,398 to €273,156, wider range €156,205 to €405,541.
 - House, 600 m² on 3,000 m² of land, Uccle 1180, excellent condition, 7 bedrooms, garage, terrace, pool: €2,728,910 from the luxury model (probability 98%).
   ![High-end house](docs/img/prediction_high_end.png)
 
@@ -92,6 +93,7 @@ Measured on a sealed test split of 15% of the listings, which nothing was fitted
 | Median error | 12.9% |
 | Estimates within 10% / 20% of the asking price | 40% / 66% |
 | 10th to 90th percentile range holds the real price | 80.4% of the 2,344 standard-segment listings |
+| "Most likely" band (about -12% / +15%) holds it | 50.1% of them (target 50%) |
 
 The confidence interval is a bootstrap over the test rows. Drawing the split with other seeds moves the standard model's MAPE between 20.2% and 21.4%, so read the error as about 20 to 21%, and treat any change under a point as noise. The range holds the price less often where the model is weakest: about 74% for estimates above €500k, and no range at all in the luxury segment.
 

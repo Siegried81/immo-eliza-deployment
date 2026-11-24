@@ -210,3 +210,32 @@ class TestLuxuryCap:
         from src.train import routed_price
         out = routed_price(np.array([1e6, 1e6]), np.array([3e6, 3e6]), np.array([0.95, 0.1]), 0.9)
         assert out.tolist() == [1.5e6, 1e6]
+
+
+class TestLikelyBand:
+    """The darker band in the UI: where the price lands one time in two."""
+
+    def test_the_band_sits_inside_the_wider_range_around_the_estimate(self):
+        body = client.post("/predict", json=APARTMENT).json()
+        likely, wide = body["likely_range"], body["prediction_interval"]
+        assert wide["lower"] <= likely["lower"] <= body["prediction"] <= likely["upper"] <= wide["upper"]
+
+    def test_the_luxury_segment_gets_no_band(self, monkeypatch):
+        fake = {"prediction": 2_000_000.0, "luxury_prediction": 2_800_000.0, "luxury_proba": 0.95, "notes": [],
+                "prediction_interval": {"lower": 1.0, "upper": 2.0}, "likely_range": {"lower": 1.0, "upper": 2.0}}
+        monkeypatch.setattr(api.app.engine, "predict", lambda data: fake)
+        assert client.post("/predict", json=APARTMENT).json()["likely_range"] is None
+
+    def test_a_calibration_file_without_the_band_fails_instead_of_guessing(self, tmp_path):
+        from api.predict import load_likely_band
+        path = tmp_path / "interval_calibration.json"
+        path.write_text('{"log_margin": 0.05}')
+        with pytest.raises(KeyError):
+            load_likely_band(path)
+
+    def test_the_committed_band_held_about_half_the_test_prices(self):
+        import json
+
+        from api.predict import CALIBRATION_PATH
+        calibration = json.loads(CALIBRATION_PATH.read_text())
+        assert abs(calibration["likely_check_coverage"] - calibration["likely_coverage"]) < 0.03
