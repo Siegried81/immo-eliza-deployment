@@ -54,12 +54,12 @@ Test split of `src/train.py`: 2,361 listings that nothing was fitted, tuned or c
 
 | Tier | MAPE |
 |---|---:|
-| All listings | 20.6% |
-| < €1M | 19.9% |
-| €1M to €1.95M | 31.1% |
-| >= €1.95M (21 listings) | 44.0% |
+| All listings | 20.3% |
+| < €1M | 19.8% |
+| €1M to €1.95M | 27.4% |
+| >= €1.95M (21 listings) | 43.9% |
 
-Median error 12.9%. The 10th to 90th percentile range held the real price 80.4% of the time (target 80%; 70.8% before calibration on a separate split).
+Median error 12.9%. 95% bootstrap interval on the overall MAPE: 19.1% to 21.6%. The 10th to 90th percentile range held the real price on 80.4% of the 2,344 standard-segment test listings (target 80%; 70.8% before calibration on a separate split). It holds less often for estimates above €500k (about 74%), and the luxury segment gets no range.
 
 ## Training data and limitations
 

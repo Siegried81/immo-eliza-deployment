@@ -12,6 +12,7 @@ Run:
 """
 import os
 import sys
+import time
 from datetime import date
 from pathlib import Path
 
@@ -31,6 +32,11 @@ API_DOCS_URL = os.getenv("API_DOCS_URL", f"{API_URL}/docs").strip()
 # Render's free tier sleeps after inactivity. A cold wake measured 83 s, so 90 s
 # left almost no margin.
 PREDICT_TIMEOUT_S = 120
+# While Render wakes an instance, its proxy can answer 502/503/504 before the
+# app is up. One retry after a short wait turns that into a slow answer
+# instead of an error on a visitor's first click.
+WAKING_STATUSES = {502, 503, 504}
+RETRY_WAIT_S = 5
 HISTORY_SIZE = 5
 
 VOCABULARY = load_vocabulary()
@@ -67,26 +73,52 @@ def euro(value: float) -> str:
 
 @st.cache_data(ttl=60, show_spinner=False)
 def api_is_awake() -> bool:
-    """Ping the API at most once a minute; a sleeping Render instance times out."""
+    """
+    Ping the API at most once a minute; a sleeping Render instance times out.
+
+    Cleared after every successful estimate, so the sidebar never says
+    "asleep" right under a price the API just returned.
+    """
     try:
-        return requests.get(f"{API_URL}/ping", timeout=3).ok
+        return requests.get(f"{API_URL}/ping", timeout=5).ok
     except requests.RequestException:
         return False
 
 
 def request_estimate(payload: dict) -> tuple[dict | None, str | None]:
-    """POST the property to /predict. Returns (result, error message)."""
-    try:
-        response = requests.post(f"{API_URL}/predict", json=payload, timeout=PREDICT_TIMEOUT_S)
-    except requests.exceptions.Timeout:
-        return None, "The API took too long to answer. It may still be waking up: try again in a moment."
-    except requests.exceptions.ConnectionError:
-        return None, f"Cannot reach the API at {API_URL}. Is the backend running?"
+    """
+    POST the property to /predict. Returns (result, error message).
 
+    Every failure becomes a message, never a traceback on the page: a dropped
+    connection, a proxy page instead of JSON, or an error status. A 502/503/504
+    is retried once, since Render's proxy sends them while the API wakes up.
+    """
+    for attempt in range(2):
+        try:
+            response = requests.post(f"{API_URL}/predict", json=payload, timeout=PREDICT_TIMEOUT_S)
+        except requests.exceptions.Timeout:
+            return None, "The API took too long to answer. It may still be waking up: try again in a moment."
+        except requests.exceptions.ConnectionError:
+            return None, f"Cannot reach the API at {API_URL}. Is the backend running?"
+        except requests.exceptions.RequestException:
+            return None, "The connection to the API broke off. Please try again."
+        if response.status_code in WAKING_STATUSES and attempt == 0:
+            time.sleep(RETRY_WAIT_S)
+            continue
+        break
+
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
     if response.ok:
-        return response.json(), None
-    if response.status_code == 422:
-        detail = response.json().get("detail")
+        if not isinstance(body, dict) or "prediction" not in body:
+            return None, "The API answered with something that is not an estimate. Please try again later."
+        return body, None
+    if response.status_code in WAKING_STATUSES:
+        return None, "The API is still waking up. Please try again in a minute."
+    if response.status_code == 422 and isinstance(body, dict):
+        detail = body.get("detail")
         if isinstance(detail, list):  # pydantic field errors
             detail = "; ".join(f"{'.'.join(map(str, d['loc'][1:]))}: {d['msg']}" for d in detail)
         return None, f"Some inputs were rejected: {detail}"
@@ -94,15 +126,26 @@ def request_estimate(payload: dict) -> tuple[dict | None, str | None]:
 
 
 def range_bar(lower: float, prediction: float, upper: float) -> str:
-    """HTML bar of the 10th-90th percentile interval with a marker at the estimate."""
+    """
+    HTML bar of the 10th-90th percentile interval with a marker at the estimate.
+
+    The aria-label carries the three prices, since a screen reader gets nothing
+    from the coloured bar itself.
+    """
     low, high = min(lower, prediction), max(upper, prediction)
     span = (high - low) or 1
     left = (lower - low) / span * 100
     width = (upper - lower) / span * 100
     marker = (prediction - low) / span * 100
-    return (f'<div class="range"><div class="range-fill" style="left:{left:.1f}%;width:{width:.1f}%"></div>'
+    label = f"Likely range from {euro(lower)} to {euro(upper)}, estimate {euro(prediction)}"
+    return (f'<div class="range" role="img" aria-label="{label}"><div class="range-fill" style="left:{left:.1f}%;width:{width:.1f}%"></div>'
             f'<div class="range-marker" style="left:calc({marker:.1f}% - 2px)"></div></div>'
             f'<div class="range-labels"><span>{euro(lower)}</span><span>{euro(upper)}</span></div>')
+
+
+def spread(lower: float, prediction: float, upper: float) -> str:
+    """The range as percentages of the estimate, e.g. "-35% / +70%"."""
+    return f"{(lower / prediction - 1):+.0%} / {(upper / prediction - 1):+.0%}"
 
 
 def show_result(result: dict, livable_surface: int) -> None:
@@ -115,7 +158,9 @@ def show_result(result: dict, livable_surface: int) -> None:
     if interval:
         range_html = (range_bar(interval["lower"], result["prediction"], interval["upper"])
                       + "<div class='price-label' style='margin-top:.3rem'>"
-                        "Likely range: calibrated to hold the real price for 8 listings in 10</div>")
+                        "Likely range "
+                        f"({spread(interval['lower'], result['prediction'], interval['upper'])}): "
+                        "calibrated to hold the real price for 8 listings in 10</div>")
     st.markdown(
         f"<div class='price-card'><div class='price-label'>Estimated price {badge}</div>"
         f"<div class='price-value'>{euro(result['prediction'])}</div>{range_html}</div>",
@@ -124,8 +169,8 @@ def show_result(result: dict, livable_surface: int) -> None:
 
     col1, col2 = st.columns(2)
     col1.metric("Price per m² (livable)", euro(result["prediction"] / livable_surface))
-    col2.metric("Luxury probability", f"{result.get('luxury_probability', 0):.0%}",
-                help="Output of the routing classifier. Above the threshold, the luxury model prices the property.")
+    col2.metric("Chance it is a €1.95M+ property", f"{result.get('luxury_probability', 0):.0%}",
+                help="From the routing classifier. From 90% on, the luxury model prices the property.")
 
     if segment == "luxury":
         st.warning("Priced by the luxury model (properties around €1.95M and above). It learned from "
@@ -133,9 +178,13 @@ def show_result(result: dict, livable_surface: int) -> None:
                    "is available for this segment.")
     for note in result.get("notes", []):
         st.info(note)
+    if segment == "luxury":
+        return
+    # These figures describe the standard model below €1M; after a luxury
+    # price they would promise an accuracy that segment does not have.
     st.caption("Estimation tool, not a valuation. On 2,253 test listings below €1M, half of the "
                "estimates land within 13% of the asking price and two in three within 20%; the average "
-               "error is about 20% (about €64k). Estimates run high for listings under €150k and low "
+               "error is about 20% (about €63k). Estimates run high for listings under €150k and low "
                "above €500k.")
 
 
@@ -150,7 +199,7 @@ with st.sidebar:
     if api_is_awake():
         st.success("API online", icon="🟢")
     else:
-        st.warning("API asleep or unreachable. The first estimate may take up to 90 seconds.", icon="🟠")
+        st.warning("API asleep or unreachable. The first estimate may take up to two minutes.", icon="🟠")
     if API_DOCS_URL:
         st.markdown(f"[API documentation]({API_DOCS_URL})")
     st.divider()
@@ -227,12 +276,16 @@ payload = {
 
 with output:
     if clicked:
-        with st.spinner("Estimating… (the first call can take up to a minute while the API wakes up)"):
+        waiting = ("Estimating…" if api_is_awake()
+                   else "Estimating… (the API is waking up, this first call can take up to two minutes)")
+        with st.spinner(waiting):
             result, error = request_estimate(payload)
         if error:
             st.error(error)
         else:
+            api_is_awake.clear()
             st.session_state["last"] = (result, int(livable_surface))
+            st.session_state["last_payload"] = payload
             st.session_state["history"].insert(0, {
                 "Type": property_type.title(), "City": city, "m²": int(livable_surface),
                 "Condition": property_state.capitalize(), "Estimate": euro(result["prediction"]),
@@ -240,6 +293,8 @@ with output:
             del st.session_state["history"][HISTORY_SIZE:]
 
     if "last" in st.session_state:
+        if st.session_state.get("last_payload") != payload:
+            st.warning("The inputs changed since this estimate. Click Estimate to update it.")
         show_result(*st.session_state["last"])
     else:
         with st.container(border=True):

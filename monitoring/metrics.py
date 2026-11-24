@@ -4,8 +4,8 @@ overall and per price tier.
 
 The test split is the only data nothing was fitted, early-stopped, tuned or
 chosen on. The validation split did all of that, so it's no place for a
-headline figure. The earlier "true holdout" (rows absent from
-data/training_baseline.csv) still held ~80% of the training rows.
+headline figure. A holdout made of rows "absent from the training set" is not
+enough either: it can still contain most of the training rows.
 """
 import json
 from pathlib import Path

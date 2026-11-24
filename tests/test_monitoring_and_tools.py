@@ -137,7 +137,9 @@ class TestRoutingAndRange:
 
     def test_luxury_has_no_range(self):
         chosen = route({**self.RESULT, "luxury_proba": 0.9}, 0.9)
-        assert chosen == {"prediction": 2_500_000.0, "segment": "luxury",
+        # Capped at 1.5x the standard estimate: the luxury model's €2.5M for a
+        # €300k house is the misrouting the cap exists for.
+        assert chosen == {"prediction": 450_000.0, "segment": "luxury",
                           "prediction_interval": None}
 
     def test_missing_calibration_fails_instead_of_a_zero_margin(self, tmp_path):
@@ -246,3 +248,40 @@ class TestOptimize:
         data = (X[:90], y[:90], X[90:], y[90:])
         score = optimize.objective(self.FakeTrial(), data)
         assert 0 <= score < 1
+
+
+class TestPsiSensitivity:
+    def test_a_shift_on_a_skewed_feature_is_seen(self):
+        """Equal-width bins over a long tail put almost every row in one bin, and
+        a surface shift of x1.5 read as stable (PSI 0.08). Decile bins see it."""
+        rng = np.random.default_rng(0)
+        surface = rng.lognormal(np.log(150), 0.5, 5000)
+        surface[:5] = 5000  # the long tail of the real data
+        assert monitor.psi(surface, rng.lognormal(np.log(150), 0.5, 2000)) < 0.1
+        assert monitor.psi(surface, rng.lognormal(np.log(150), 0.5, 2000) * 1.5) > 0.25
+
+    def test_a_discrete_feature_works(self):
+        bedrooms = np.repeat([1, 2, 3, 4, 5], [10, 30, 40, 15, 5])
+        assert monitor.psi(bedrooms, bedrooms) < 1e-6
+        assert monitor.psi(bedrooms, bedrooms + 2) > 0.25
+
+    def test_category_shares_drift(self):
+        train = ["brussels"] * 20 + ["liege"] * 40 + ["antwerp"] * 40
+        assert monitor.categorical_psi(train, train) < 1e-6
+        assert monitor.categorical_psi(train, ["brussels"] * 100) > 0.25
+
+    def test_report_covers_the_categorical_inputs(self):
+        rng = np.random.default_rng(0)
+        train = pd.DataFrame({f: rng.normal(100, 10, 400) for f in MONITORED_FEATURES})
+        train["province"] = rng.choice(["brussels", "liege", "antwerp"], 400)
+        logs = [{"source": "api", "features": {**row, "province": "brussels"}}
+                for row in train.drop(columns="province").to_dict("records")]
+        results, _ = check_drift.drift_report(logs, train)
+        assert check_drift.status(results["province"]["psi"]) == "STRONG DRIFT"
+        assert check_drift.status(results["livable_surface"]["psi"]) == "OK"
+
+    def test_too_few_entries_are_not_reported(self, log_path, capsys):
+        for _ in range(check_drift.MIN_SAMPLES - 1):
+            monitor.log_prediction({}, 1.0, features={"livable_surface": 100})
+        check_drift.main(log_path)
+        assert "need 300+" in capsys.readouterr().out

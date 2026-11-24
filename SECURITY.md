@@ -30,8 +30,10 @@ way, and it will be revoked rather than merely deleted.
 
 ## What is in scope here
 
-- The prediction API is public and unauthenticated by design; it stores no
-  request and no personal data.
+- The prediction API is public and unauthenticated by design. It logs the
+  property fields of each request to a local file for drift monitoring, with
+  no IP address, name or other personal data. Field sizes are bounded, so a
+  request cannot write an oversized log line.
 - In scope: input that crashes the API or the model, unbounded requests that
   exhaust the free hosting tier, and model files loaded from an untrusted path
   (`joblib` executes code on load).

@@ -10,7 +10,7 @@ Run:
     python -m monitoring.generate_logs [n]
     python -m monitoring.check_drift monitoring/synthetic_logs.jsonl
 """
-import sys
+import argparse
 from pathlib import Path
 
 import joblib
@@ -44,4 +44,8 @@ def populate_logs(n=1500, path=SYNTHETIC_LOG):
 
 
 if __name__ == "__main__":
-    populate_logs(int(sys.argv[1]) if len(sys.argv) > 1 else 1500)
+    parser = argparse.ArgumentParser(description="Write a synthetic prediction log.")
+    parser.add_argument("n", nargs="?", type=int, default=1500, help="number of entries")
+    parser.add_argument("--out", type=Path, default=SYNTHETIC_LOG, help="file to (re)write")
+    args = parser.parse_args()
+    populate_logs(args.n, args.out)

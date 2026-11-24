@@ -3,8 +3,10 @@
 # wheels for older versions. The tests need only the committed models/, not data/.
 name: tests
 
+# Pushes to main only: a pull request branch is already checked by pull_request.
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:

@@ -30,7 +30,7 @@ import joblib
 import numpy as np
 import pandas as pd
 
-from src.train import TARGET, load_dataset, price_tiers, split_all
+from src.train import TARGET, load_dataset, price_tiers, routed_price, split_all
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 
@@ -58,7 +58,7 @@ def main(on_test=False):
 
     for threshold in thresholds:
         routed = proba >= threshold
-        predicted = np.where(routed, luxury, standard)
+        predicted = routed_price(standard, luxury, proba, threshold)
         rows = []
         for name, low, high in price_tiers(luxury_price):
             mask = (actual >= low) & (actual < high)

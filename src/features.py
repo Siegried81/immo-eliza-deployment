@@ -179,6 +179,15 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
     # Swimming pool conversion
     df["swimming_pool"] = df["swimming_pool"].fillna(0).astype(int)
 
+    # Garage and terrace are 0/1 flags in the training data, and the API takes
+    # "any value above 0" as yes. Folding a count or an area to 1 gives the model
+    # the value it was trained on (the trees split between 0 and 1, so the price
+    # does not move) and keeps the drift log on the training scale. A missing
+    # terrace stays missing for the median imputer.
+    df["garage"] = (pd.to_numeric(df["garage"]).fillna(0) > 0).astype(int)
+    terrace = pd.to_numeric(df["terrace"])
+    df["terrace"] = (terrace > 0).astype(float).where(terrace.notna())
+
     # Property state encoding
     df["property_state_encoded"] = (
         df["property_state"]
@@ -353,6 +362,15 @@ CITY_ALIASES = {
 _CITY_ALIAS_BY_KEY = {_key(alias): canonical for alias, canonical in CITY_ALIASES.items()}
 
 
+class UnknownCategory(ValueError):
+    """
+    A property type, state or province the models never saw.
+
+    Its own class so the API answers 422 for this and nothing else: any other
+    ValueError raised while predicting is a server fault, not a bad request.
+    """
+
+
 def load_vocabulary(path: Path = VOCABULARY_PATH) -> dict:
     """Load the categories the models were trained on (scripts/export_categories.py)."""
     return json.loads(Path(path).read_text(encoding="utf-8"))
@@ -370,20 +388,20 @@ def to_training_vocabulary(data: dict, vocabulary: dict) -> tuple[dict, list[str
     separated form that add_features() produced at training time.
 
     Returns (normalized copy of data, notes for the user about the city).
-    Raises ValueError for a property type, state or province the models never saw.
+    Raises UnknownCategory for a property type, state or province the models never saw.
     """
     data = dict(data)
     notes = []
 
     property_type = str(data.get("property_type", "")).strip().lower()
     if property_type not in vocabulary["property_types"]:
-        raise ValueError(f"Unknown property_type '{data.get('property_type')}'. "
+        raise UnknownCategory(f"Unknown property_type '{data.get('property_type')}'. "
                          f"Expected one of {vocabulary['property_types']}.")
     data["property_type"] = property_type
 
     state = re.sub(r"[\s_]+", " ", str(data.get("property_state") or "NORMAL")).strip().upper()
     if state not in vocabulary["property_states"]:
-        raise ValueError(f"Unknown property_state '{data.get('property_state')}'. "
+        raise UnknownCategory(f"Unknown property_state '{data.get('property_state')}'. "
                          f"Expected one of {vocabulary['property_states']}.")
     data["property_state"] = state
 
@@ -394,7 +412,7 @@ def to_training_vocabulary(data: dict, vocabulary: dict) -> tuple[dict, list[str
             province_by_key[_key(name)] = slug
     province = province_by_key.get(_key(data.get("province", "")))
     if province is None:
-        raise ValueError(f"Unknown province '{data.get('province')}'. "
+        raise UnknownCategory(f"Unknown province '{data.get('province')}'. "
                          f"Expected one of {[p['label'] for p in provinces.values()]}.")
     data["province"] = province
 

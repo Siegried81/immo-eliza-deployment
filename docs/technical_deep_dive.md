@@ -14,7 +14,7 @@ Streamlit UI --POST /predict--> FastAPI (api/app.py)
                                   v
         standard regressor | luxury regressor | luxury classifier | 10th/90th quantile models
                                   |
-                    api/app.py :: routing (p >= 0.9 -> luxury)
+                    api/predict.py :: route (p >= 0.9 -> luxury)
                                   v
                     JSON response + prediction log (JSON Lines)
 ```
@@ -59,9 +59,10 @@ The classifier decides which regressor prices the property. On the test split (`
 | Routing | Overall MAPE | < €1M | €1M to €1.95M | >= €1.95M (21 rows) |
 |---|---:|---:|---:|---:|
 | None | 20.3% | 19.8% | 26.2% | 50.6% |
-| **0.9 (deployed)** | **20.6%** | **19.9%** | **31.1%** | **44.0%** |
+| 0.9, uncapped (until 2026-11-24) | 20.6% | 19.9% | 31.1% | 44.0% |
+| 0.9, luxury price capped at 1.5x the standard one (deployed) | 20.3% | 19.8% | 27.4% | 43.9% |
 
-- Routing is kept for the top tier, not for the average: it costs 0.3 point overall and 5 points between €1M and €1.95M, and cuts the luxury bias from -50.6% to -41.3%.
+- The luxury model only learned prices above €1.95M, so it never answers below about €2.2M. Uncapped, 10 of the 17 routed test listings were not luxury and got about twice their price (103% mean error on those 10). The routed price is now capped at 1.5 times the standard estimate (`src/train.py::routed_price`, chosen on the validation split): their error drops to 42%, the top tier keeps its gain (mean bias -50.6% without routing, -43.7% now), and routing no longer costs anything overall.
 - 0.9 is kept, not proven best: it was picked on an earlier validation split and only checked on the next one. With 21 luxury test rows, one property moves the tier's MAPE by about 5 points.
 - The switch is hard: two properties on either side of the threshold can differ by €1M. Probability blends were measured (`python -m scripts.evaluate_routing_blend`, validation split) and rejected: with the raw probability the top tier improves but the < €1M mean bias rises from +7.2% to +16.0%; with an isotonic-calibrated probability the gains do not hold on the half of the rows that played no part in the calibration.
 
@@ -74,7 +75,7 @@ Coverage on the 2,344 standard-routed test rows: 70.8% raw, 80.4% calibrated; ov
 ## 6. Evaluation: what the numbers mean
 
 - All headline figures are test-split figures. An earlier "holdout" held most of the training rows and made the error look 6 points better than it was.
-- `python -m monitoring.metrics` scores the standard model alone (MAPE 20.28%, median 12.88%, MAE €85,137, R² 0.676). `python -m scripts.evaluate_stratified --test` scores what the API serves, routing included (20.6%). Say which one a figure is.
+- `python -m monitoring.metrics` scores the standard model alone (MAPE 20.28%, median 12.88%, MAE €85,137, R² 0.676 on euros, 0.81 on log price). `python -m scripts.evaluate_stratified --test` scores what the API serves, routing included (20.3%). Say which one a figure is.
 - MAPE weights a €150k flat and a €3M villa equally, so every table is split by price tier.
 - Mean and median bias answer different questions: an estimate at twice the price weighs +100%, one at half the price -50%, so the mean is pulled up by cheap listings. Below €1M, estimates run high under €150k (82% above the asking price, median +22%) and low between €500k and €1M (median -10%).
 - 155 of the 2,361 test listings share an address with a training listing; on those the error is 10.7%, against 21.3% on the rest. The split is random by listing, not by address.

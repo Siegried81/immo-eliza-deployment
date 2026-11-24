@@ -95,6 +95,18 @@ class TestModelUsesCategories:
         house = engine.predict(HOUSE_IN_LIEGE)["prediction"]
         apartment = engine.predict({**HOUSE_IN_LIEGE, "property_type": "APARTMENT"})["prediction"]
         assert house != apartment
+        # "!=" on two floats proves little. The bug it guards against was the
+        # encoder mapping the type to the global mean, so check the encoding:
+        # the model itself gives the type a small weight once surfaces are set.
+        import pandas as pd
+
+        from src.features import add_features, add_location, to_training_vocabulary
+        rows = [to_training_vocabulary({**HOUSE_IN_LIEGE, "property_type": t}, engine.vocabulary)[0]
+                for t in ("HOUSE", "APARTMENT")]
+        features = add_location(add_features(pd.DataFrame(rows)), engine.locations)
+        encoder = engine.pipeline.named_steps["preprocessor"].named_transformers_["cat"]
+        encoded = np.asarray(encoder.transform(features[["property_type", "province", "city", "property_state"]]))
+        assert abs(encoded[0, 0] - encoded[1, 0]) > 0.1
 
     def test_province_changes_the_price(self):
         liege = engine.predict(HOUSE_IN_LIEGE)["prediction"]
@@ -109,7 +121,7 @@ class TestModelUsesCategories:
                  "bedroom_count": 6, "swimming_pool": True}
         small = engine.predict(villa)["luxury_prediction"]
         large = engine.predict({**villa, "livable_surface": 1200, "bedroom_count": 9})["luxury_prediction"]
-        assert large != small
+        assert large > small
 
     def test_to_renovate_is_cheaper_than_normal(self):
         normal = engine.predict(HOUSE_IN_LIEGE)["prediction"]
@@ -126,12 +138,12 @@ class TestPredictEndpoint:
         assert body["notes"] == []
 
     def test_luxury_response_has_no_interval(self, monkeypatch):
-        fake = {"prediction": 900_000.0, "luxury_prediction": 4_000_000.0, "luxury_proba": 0.95,
+        fake = {"prediction": 2_000_000.0, "luxury_prediction": 2_800_000.0, "luxury_proba": 0.95,
                 "prediction_interval": {"lower": 700_000.0, "upper": 1_100_000.0}, "notes": []}
         monkeypatch.setattr(api.app.engine, "predict", lambda data: fake)
         body = client.post("/predict", json=HOUSE_IN_LIEGE).json()
         assert body["segment"] == "luxury"
-        assert body["prediction"] == 4_000_000.0
+        assert body["prediction"] == 2_800_000.0
         assert body["prediction_interval"] is None
 
     def test_unknown_province_returns_422(self):

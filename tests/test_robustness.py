@@ -6,11 +6,13 @@ Each one pins a behaviour that used to be wrong without any test noticing:
 a silent fallback threshold, exception text sent to the client, a build-year
 bound frozen at 2026, and two hand-copied model configurations.
 """
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
 import api.app
 from api.app import app
+from src.features import CATEGORICAL_FEATURES, DERIVED_FEATURES, NUMERIC_FEATURES, add_features
 from src.train import (
     DEFAULT_ROUTING_THRESHOLD,
     LUXURY_THRESHOLD_PATH,
@@ -119,3 +121,92 @@ class TestOmittedBedroomCount:
         omitted = client.post("/predict", json=APARTMENT).json()["prediction"]
         at_median = client.post("/predict", json={**APARTMENT, "bedroom_count": median}).json()["prediction"]
         assert omitted == at_median
+
+
+class TestUnexpectedValueError:
+    def test_a_library_value_error_is_a_500_not_a_422(self, monkeypatch):
+        """Only an unknown category is the caller's fault. Any other ValueError
+        raised while predicting is a server fault and must not leak its text."""
+        def broken(data):
+            raise ValueError("Input X contains NaN (sklearn internals)")
+        monkeypatch.setattr(api.app.engine, "predict", broken)
+        response = client.post("/predict", json=APARTMENT)
+        assert response.status_code == 500
+        assert "sklearn" not in response.text
+
+
+class TestInputBounds:
+    @pytest.mark.parametrize("field, value", [
+        ("livable_surface", 10**15), ("bedroom_count", 10**6), ("total_surface", 10**9),
+        ("train_station_distance_m", 10**7), ("terrace", 10**9), ("city", "x" * 100_000),
+        ("province", "x" * 1000),
+    ])
+    def test_absurd_values_are_rejected(self, field, value):
+        """An absurd value used to get a price (and a 100 kB line in the log)."""
+        assert client.post("/predict", json={**APARTMENT, field: value}).status_code == 422
+
+    def test_the_largest_training_values_are_still_accepted(self):
+        biggest = {**APARTMENT, "livable_surface": 5000, "total_surface": 178_367, "bedroom_count": 100,
+                   "train_station_distance_m": 13_500, "city": "x" * 30}
+        assert client.post("/predict", json=biggest).status_code == 200
+
+
+class TestRangeContainsTheEstimate:
+    def test_the_range_is_widened_to_include_the_point(self, monkeypatch):
+        """Three separate models can disagree: a point below the 10th-percentile
+        model's value must still sit inside the published range."""
+        engine = api.app.engine
+        monkeypatch.setattr(engine.pipeline, "predict", lambda df: np.array([np.log1p(100_000.0)]))
+        monkeypatch.setattr(engine.pipeline_lower, "predict", lambda df: np.array([np.log1p(150_000.0)]))
+        monkeypatch.setattr(engine.pipeline_upper, "predict", lambda df: np.array([np.log1p(200_000.0)]))
+        interval = engine.predict(APARTMENT)["prediction_interval"]
+        assert interval["lower"] == pytest.approx(100_000.0)
+        assert interval["upper"] > 200_000.0
+
+
+class TestSchemaMatchesModels:
+    def test_every_schema_field_is_read_by_a_model(self):
+        """A required field no model reads (postcode once) misleads the caller;
+        a model input the schema lacks is always imputed."""
+        schema = set(api.app.PropertyInput.model_fields) - {"garden_m2"}  # deprecated, ignored
+        model_inputs = set(NUMERIC_FEATURES + CATEGORICAL_FEATURES) - set(DERIVED_FEATURES)
+        assert model_inputs - schema == set()
+        assert schema - model_inputs == set()
+
+
+class TestFlagsAreFoldedToTraining:
+    def test_garage_and_terrace_counts_become_yes(self):
+        import pandas as pd
+        df = add_features(pd.DataFrame([{"livable_surface": 100, "garage": 3, "terrace": 300},
+                                        {"livable_surface": 100, "garage": 0, "terrace": None}]))
+        assert df["garage"].tolist() == [1, 0]
+        assert df["terrace"].iloc[0] == 1.0
+        assert pd.isna(df["terrace"].iloc[1])  # unknown stays unknown for the imputer
+
+
+class TestLuxuryCap:
+    """The luxury model only learned prices above ~€1.95M; a €1M house routed to
+    it used to get about twice its price."""
+
+    def result(self, standard, luxury, proba):
+        return {"prediction": standard, "luxury_prediction": luxury, "luxury_proba": proba,
+                "prediction_interval": {"lower": 1.0, "upper": 2.0}}
+
+    def test_a_routed_price_is_capped_by_the_standard_estimate(self):
+        from src.train import LUXURY_MAX_RATIO
+        chosen = api.app.route(self.result(1_000_000.0, 2_300_000.0, 0.95), 0.9)
+        assert chosen["segment"] == "luxury"
+        assert chosen["prediction"] == pytest.approx(LUXURY_MAX_RATIO * 1_000_000.0)
+
+    def test_a_luxury_price_under_the_cap_is_kept(self):
+        chosen = api.app.route(self.result(2_200_000.0, 2_700_000.0, 0.95), 0.9)
+        assert chosen["prediction"] == 2_700_000.0
+
+    def test_below_the_threshold_the_standard_price_is_served(self):
+        chosen = api.app.route(self.result(1_000_000.0, 2_300_000.0, 0.5), 0.9)
+        assert chosen["prediction"] == 1_000_000.0 and chosen["segment"] == "standard"
+
+    def test_the_rule_works_on_arrays_for_the_evaluation_scripts(self):
+        from src.train import routed_price
+        out = routed_price(np.array([1e6, 1e6]), np.array([3e6, 3e6]), np.array([0.95, 0.1]), 0.9)
+        assert out.tolist() == [1.5e6, 1e6]
