@@ -68,7 +68,7 @@ Measured and not done: leaving missing values to XGBoost, an "unknown" state cat
 
 ## 2026-11-15: bias is published as a median and by price band
 
-The UI caption, README and model card no longer say prices below €1M are overestimated by about 6%. That was the mean of (estimate - price) / price, which is positive for a model that is too high as often as too low: twice the price weighs +100%, half the price -50%. Below €1M, as deployed, the mean is +5.1%, the median +0.3%, and the estimates sum to 1.6% under the prices. The median bias is +22.4% under €150k (82% of 257 rows estimated above their price), +4.3% from €150k to €250k, -1.4% from €250k to €500k and -9.8% from €500k to €1M. `evaluate_stratified.py` prints mean, median and total bias per tier; the mean is still published, named "mean bias".
+The UI caption and README no longer say prices below €1M are overestimated by about 6%. That was the mean of (estimate - price) / price, which is positive for a model that is too high as often as too low: twice the price weighs +100%, half the price -50%. Below €1M, as deployed, the mean is +5.1%, the median +0.3%, and the estimates sum to 1.6% under the prices. The median bias is +22.4% under €150k (82% of 257 rows estimated above their price), +4.3% from €150k to €250k, -1.4% from €250k to €500k and -9.8% from €500k to €1M. `evaluate_stratified.py` prints mean, median and total bias per tier; the mean is still published, named "mean bias".
 
 ## 2026-11-15: the same building can sit on both sides of the split
 
@@ -98,7 +98,7 @@ No model and no headline figure changed.
 - `add_features()` folds garage and terrace to 0/1. The training data only holds 0 and 1, and the API reads any positive value as yes, so the price does not move; the drift log now stays on the training scale.
 - The API bounds every field well above the largest training value and caps text at 64 characters. A surface of 10^15 m² or a 100 kB city name used to get a price and a log line.
 - Only an unknown category (`src.features.UnknownCategory`) answers 422. Any other error while predicting is a 500 without its message.
-- The README, model card and Space README give the MAPE with its bootstrap interval, the share of estimates within 10% and 20%, say the range figure covers the standard segment only, and give R² on both scales.
+- The README gives the MAPE with its bootstrap interval, the share of estimates within 10% and 20%, say the range figure covers the standard segment only, and give R² on both scales.
 
 ## 2026-11-24: the luxury price is capped at 1.5 times the standard estimate
 
@@ -107,3 +107,8 @@ Why: the luxury model learned only prices above the luxury price (€1,949,050),
 Chosen on the validation split, 13 routed rows: no cap, 1.25, 1.5 and 2.0, and a gate on the standard estimate. 1.5 kept the top tier at 40.8%, brought the €1M to €1.95M tier from 28.1% to 26.8% and the overall from 21.07% to 20.98%; 1.25 cost the top tier 4 points, 2.0 changed nothing.
 Measured afterwards on the test split, not chosen on it: overall MAPE 20.6% to 20.3%, below €1M 19.9% to 19.8%, €1M to €1.95M 31.1% to 27.4%, top tier 44.0% to 43.9%; error on the 10 wrongly routed listings 103% to 42%. The README examples do not move: the Uccle villa's luxury price sits under the cap.
 Revisit when the luxury model is retrained on more rows or a lower threshold: the cap exists because it cannot price anything near €1M.
+
+## 2026-11-24: no Hugging Face publishing
+
+`hf/` (model card, Space image), `scripts/publish_hf.py` and its tests are gone, with `huggingface_hub` in the dev requirements. The demo is the Streamlit app, with the API on Render; the images are on Docker Hub and GHCR.
+Why: Hugging Face now hosts Docker Spaces only for PRO accounts (the Space push got 402 Payment Required), and a second copy of the models and their card on the Hub was one more place for figures to go stale (the card was a month and two retrains behind).

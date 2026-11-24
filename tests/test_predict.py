@@ -371,7 +371,7 @@ class TestCityAliases:
 
 
 class TestEngineWithoutOptionalFields:
-    """The model card calls engine.predict on a dict with only the required fields."""
+    """A direct engine.predict call may pass a dict with only the required fields."""
 
     MINIMAL = {"postcode": 1050, "province": "Brussels", "city": "Ixelles",
                "property_type": "APARTMENT", "livable_surface": 90}

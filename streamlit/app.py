@@ -26,8 +26,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.features import LOW_SAMPLE_CITY, STATE_MAPPING, load_locations, load_vocabulary  # noqa: E402
 
 API_URL = os.getenv("API_URL", "http://localhost:8000").strip().rstrip("/")
-# Set to an empty string where the API is private to the UI (the Hugging Face
-# Space): a link to a localhost URL would open on the visitor's own machine.
+# Set to an empty string where the API is private to the UI (only reachable on
+# the UI's own localhost): such a link would open on the visitor's machine.
 API_DOCS_URL = os.getenv("API_DOCS_URL", f"{API_URL}/docs").strip()
 # Render's free tier sleeps after inactivity. A cold wake measured 83 s, so 90 s
 # left almost no margin.
