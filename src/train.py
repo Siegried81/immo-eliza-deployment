@@ -47,6 +47,15 @@ MIN_PLAUSIBLE_PRICE = 10_000
 # jumped to a luxury-model price.
 DEFAULT_ROUTING_THRESHOLD = 0.9
 
+# A routed property is priced by the luxury model, capped at this multiple of
+# the standard model's estimate. The luxury model only learned prices above
+# the luxury price (~€1.95M), so it never answers below ~€2.2M: of the 17 test
+# listings the router sends to it, 10 are not luxury and got about twice their
+# price. Chosen on the validation split (13 routed rows): 1.5 keeps the top
+# tier's MAPE (40.8%) and brings the €1M to €1.95M tier from 28.1% to 26.8%;
+# 1.25 costs the top tier 4 points, 2.0 changes nothing.
+LUXURY_MAX_RATIO = 1.5
+
 # Four disjoint splits, drawn once with SPLIT_SEED and shared by every script:
 #   train        70%  fits every model and the preprocessor
 #   validation   10%  early stopping, the Optuna search, the routing threshold
@@ -55,7 +64,7 @@ DEFAULT_ROUTING_THRESHOLD = 0.9
 #                     scripts/evaluate_stratified.py --test, the range coverage)
 # The test rows are drawn from the 80% that an earlier 80/20 split
 # (LEGACY_VALIDATION_SIZE) left for training, so no earlier choice (the 0.9
-# threshold, the October search, the blend comparison) was scored on them.
+# threshold, the hyperparameter search, the blend comparison) was scored on them.
 # Drawn with the same seed, a fresh 15% would sit entirely inside that old 20%.
 TEST_SIZE = 0.15
 CALIBRATION_SIZE = 0.05
@@ -112,6 +121,16 @@ def split(frame):
     """
     train, validation, _, _ = split_all(frame)
     return train, validation
+
+
+def routed_price(standard, luxury, proba, threshold, max_ratio=LUXURY_MAX_RATIO):
+    """
+    The price served: the standard estimate, or at or above `threshold` the
+    luxury estimate capped at `max_ratio` times the standard one. Works on
+    floats and on arrays, so the API, the CLI and the evaluation scripts share
+    one rule and cannot score a different pipeline from the one deployed.
+    """
+    return np.where(proba >= threshold, np.minimum(luxury, max_ratio * standard), standard)
 
 
 def price_bounds(train_prices):

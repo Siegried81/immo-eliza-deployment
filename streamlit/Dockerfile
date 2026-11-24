@@ -11,7 +11,14 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade pip && \
     pip install --only-binary=:all: -r requirements.txt
 
-COPY . .
+# Only what the UI reads: its script, the feature helpers and the two lookup
+# files. The joblib models stay out, since the UI never loads them.
+RUN useradd --create-home --uid 1000 app
+COPY --chown=app:app .streamlit/ .streamlit/
+COPY --chown=app:app streamlit/ streamlit/
+COPY --chown=app:app src/ src/
+COPY --chown=app:app models/categories.json models/locations.json models/
+USER app
 
 EXPOSE 10000
 
@@ -20,4 +27,5 @@ EXPOSE 10000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD ["python", "-c", "import os,urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('PORT', '10000') + '/_stcore/health', timeout=4).status == 200 else 1)"]
 
-CMD ["sh", "-c", "streamlit run streamlit/app.py --server.port=${PORT:-10000} --server.address=0.0.0.0"]
+# exec: the server becomes PID 1 and gets the SIGTERM of `docker stop` itself.
+CMD ["sh", "-c", "exec streamlit run streamlit/app.py --server.port=${PORT:-10000} --server.address=0.0.0.0"]

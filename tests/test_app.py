@@ -45,6 +45,11 @@ class TestPredict:
 
         response = client.post("/predict", json=payload)
         assert response.status_code == 200, response.json()
+        body = response.json()
+        # An 85 m² Brussels apartment: a constant or zero price would pass a
+        # status check alone.
+        assert 100_000 < body["prediction"] < 1_000_000
+        assert body["prediction_interval"]["lower"] <= body["prediction"] <= body["prediction_interval"]["upper"]
 
     def test_predict_invalid_postcode(self):
         """

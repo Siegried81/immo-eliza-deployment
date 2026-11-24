@@ -1,6 +1,10 @@
 # Immo Eliza Deployment
 
-A REST API and a web interface that estimate the asking price of a Belgian house or apartment, with a likely price range and a separate model for the luxury segment. Deployment phase of the BeCode Immo Eliza machine-learning project.
+Give it a Belgian house or apartment and it gives back an asking-price estimate, the range the price most likely falls in, and a warning when the property looks like luxury. On 2,361 listings it never saw, half the estimates land within 13% of the asking price and two in three within 20%.
+
+XGBoost pipelines behind a FastAPI service, a Streamlit form in front, Docker images built and scanned in CI, and a drift report on the prediction log.
+
+![Typical house](docs/img/prediction_typical.png)
 
 - Web app: https://immo-eliza-deployment-sieg.streamlit.app
 - API (Render, free tier, sleeps when idle: the first call can take a minute): https://immo-eliza-deployment-j8av.onrender.com/docs
@@ -76,8 +80,7 @@ tests/        offline pytest suite
 
 ## Prediction Examples
 
-- House, 150 m², Liège 4000, normal condition, form defaults otherwise: €238,354 from the standard model, range €156,205 to €405,541.
-  ![Typical house](docs/img/prediction_typical.png)
+- House, 150 m², Liège 4000, normal condition, form defaults otherwise: €238,354 from the standard model, range €156,205 to €405,541 (screenshot at the top).
 - House, 600 m² on 3,000 m² of land, Uccle 1180, excellent condition, 7 bedrooms, garage, terrace, pool: €2,728,910 from the luxury model (probability 98%).
   ![High-end house](docs/img/prediction_high_end.png)
 
@@ -87,9 +90,12 @@ Measured on a sealed test split of 15% of the listings, which nothing was fitted
 
 | Deployed pipeline, routing at 0.9 | |
 |---|---:|
-| Mean absolute percentage error | 20.6% (19.9% below €1M) |
+| Mean absolute percentage error | 20.3% (19.8% below €1M), 95% CI 19.1% to 21.6% |
 | Median error | 12.9% |
-| 10th to 90th percentile range holds the real price | 80.4% of the time |
+| Estimates within 10% / 20% of the asking price | 40% / 66% |
+| 10th to 90th percentile range holds the real price | 80.4% of the 2,344 standard-segment listings |
+
+The confidence interval is a bootstrap over the test rows. Drawing the split with other seeds moves the standard model's MAPE between 20.2% and 21.4%, so read the error as about 20 to 21%, and treat any change under a point as noise. The range holds the price less often where the model is weakest: about 74% for estimates above €500k, and no range at all in the luxury segment.
 
 Details by price tier, the range calibration and the luxury routing are in the [deep dive](docs/technical_deep_dive.md#4-luxury-routing).
 
@@ -100,7 +106,10 @@ Details by price tier, the range calibration and the luxury routing are in the [
 - Above about €1.95M the error is close to half the price, mostly underestimation: the luxury model learned from 111 listings.
 - The location is the centroid of the postcode's training listings, not the street. A city name outside the training vocabulary is ignored, and the response says so.
 - The prediction log does not survive a Render restart unless `PREDICTION_LOG_PATH` points at a persistent disk, so no drift report on real traffic exists yet.
-- The data is one scrape of asking prices, not sale prices.
+- The data is one scrape of asking prices, not sale prices. It was collected once from Immovlan for a training project and is not redistributed. Don't use it commercially.
+- 155 of the 2,361 test listings share an address with a training listing. On a building the models never saw, the error is about 0.7 point higher.
+- Accuracy differs by region: the mean error is about 15% in Antwerp and Walloon Brabant and 27% to 30% in West Flanders and Hainaut. The direction does not: no province is consistently over- or underestimated.
+- Not for lending, credit or any decision about a person. The models read the postcode, so they reproduce local price patterns, and the error is far too wide for an underwriting use.
 
 ## Tests and CI
 
@@ -109,7 +118,7 @@ pip install -r requirements.txt -r requirements-dev.txt
 ruff check . && python -m pytest
 ```
 
-The suite is offline (the UI tests mock the API). GitHub Actions lints and tests on every push and pull request (`tests.yml`), and `publish.yml` builds, smoke-tests and scans both images before pushing them to GHCR and Docker Hub. The `.joblib` models are committed (14 MB) and pickled: the pins in `requirements.txt` must match the versions they were trained with.
+The suite is offline (the UI tests mock the API). GitHub Actions lints and tests every pull request and every push to `main` (`tests.yml`), and `publish.yml` builds, smoke-tests and scans both images before pushing them to GHCR and Docker Hub. The `.joblib` models are committed (14 MB) and pickled: the pins in `requirements.txt` must match the versions they were trained with.
 
 ## Author
 

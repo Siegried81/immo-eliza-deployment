@@ -21,7 +21,7 @@ import joblib
 import numpy as np
 from sklearn.model_selection import train_test_split
 
-from src.train import DEFAULT_ROUTING_THRESHOLD, SPLIT_SEED, TARGET, load_dataset, price_tiers, split
+from src.train import DEFAULT_ROUTING_THRESHOLD, SPLIT_SEED, TARGET, load_dataset, price_tiers, routed_price, split
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 
@@ -67,7 +67,9 @@ def main():
                         ("Check half (calibration never saw it)", ~calib)]:
         print(f"== {label}")
         candidates = {
-            f"threshold {DEPLOYED_THRESHOLD} (deployed)": np.where(proba >= DEPLOYED_THRESHOLD, luxury, standard),
+            f"threshold {DEPLOYED_THRESHOLD}, capped (deployed)": np.log1p(routed_price(
+                np.expm1(standard), np.expm1(luxury), proba, DEPLOYED_THRESHOLD)),
+            f"threshold {DEPLOYED_THRESHOLD}, uncapped": np.where(proba >= DEPLOYED_THRESHOLD, luxury, standard),
             "blend, raw probability": blend(standard, luxury, proba),
             "blend, isotonic probability": blend(standard, luxury, proba_cal),
             "threshold 0.5, isotonic": np.where(proba_cal >= 0.5, luxury, standard),

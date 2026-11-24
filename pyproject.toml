@@ -6,6 +6,10 @@
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-q"
+# category_encoders 2.8.1 (pinned: the pickled models need it) sets a pandas
+# option pandas 3 deprecated, once per transform: ~1,800 identical lines that
+# would hide a warning from this repo's own code.
+filterwarnings = ["ignore:'future.no_silent_downcasting' is deprecated"]
 
 [tool.ruff]
 line-length = 120

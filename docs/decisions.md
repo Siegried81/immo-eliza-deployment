@@ -35,7 +35,7 @@ Revisit if a threshold or any setting gets chosen by reading the test split. The
 
 ## 2026-11-15: an optional field left out is missing, not a default
 
-`bedroom_count`, `build_year`, `terrace`, `livable_surface` and the three distances default to missing in the API schema and in `add_features()`. The median imputer fitted in training fills them (3 bedrooms, build year 1974, terrace 1, distances 502 m, 2,000 m and 706 m). Garage and pool keep 0: no training row lacks them.
+`bedroom_count`, `build_year`, `terrace` and the three distances default to missing in the API schema and in `add_features()` (`livable_surface` is required by the API). The median imputer fitted in training fills them (3 bedrooms, build year 1974, terrace 1, distances 502 m, 2,000 m and 707 m). Garage and pool keep 0: no training row lacks them.
 Why: a default of 0 or 1 is a real value far from the medians. Measured on the models of the time: a 150 m² Liège house without bedrooms went from €251,749 to €212,429 (-15.6%); a direct `engine.predict()` without distances gave 17.2% less than the API; a missing terrace came out up to 13% lower through the API. Steps: bedrooms and distances on 2026-11-08, build year on 2026-11-10 (it was 2000 in the API and the current year in training), terrace on 2026-11-15.
 Check: replaying 364 test listings through `PropertyInput` and `engine.predict()` matched the scored pipeline on all of them.
 
@@ -61,7 +61,7 @@ Revisit if the upstream cleaning drops these rows itself. Then the constant does
 
 ## 2026-11-15: what the published figures mean
 
-The figures are test-split figures, 2,361 rows: standard model MAPE 20.28%, median 12.88%, MAE €85,137, R² 0.676; as deployed with routing at 0.9, 20.6% overall, 19.9% below €1M, 44.0% on the top tier; range coverage 70.8% raw, 80.4% calibrated. `monitoring/metrics.py` scores the standard model alone, `scripts/evaluate_stratified.py --test` scores what the API serves. Say which one a figure is.
+The figures are test-split figures, 2,361 rows: standard model MAPE 20.28%, median 12.88%, MAE €85,137, R² 0.676; as deployed with routing at 0.9, 20.6% overall, 19.9% below €1M, 44.0% on the top tier (20.3%, 19.8% and 43.9% since the luxury cap of 2026-11-24); range coverage 70.8% raw, 80.4% calibrated. `monitoring/metrics.py` scores the standard model alone, `scripts/evaluate_stratified.py --test` scores what the API serves. Say which one a figure is.
 Of the 5.9 points of overall MAPE gained since 2026-11-10, 4 are the €3,048 row leaving and about 2 are the models.
 The test split was read three times that day (energy, postcode and price rule, state table). Each change was chosen on train and validation first, and none was kept or dropped for its test score: the state table reads 0.2 point worse and was kept for what it means.
 Measured and not done: leaving missing values to XGBoost, an "unknown" state category or a count of missing fields moved the cross-validated error below €1M by 0.2 point at most.
@@ -72,7 +72,7 @@ The UI caption, README and model card no longer say prices below €1M are overe
 
 ## 2026-11-15: the same building can sit on both sides of the split
 
-155 of the 2,361 test listings share their address with a training listing, and 27 are exact twins. As deployed the error is 10.7% on those and 21.3% on the other 2,206, against 20.6% on all rows. The published figures are right for a listing drawn like the data; for a building the models never saw they are about 0.7 point optimistic. The README says so. A split grouped by address would fix it and needs a new test split, which is a design decision.
+155 of the 2,361 test listings share their address with a training listing, and 27 are exact twins. As deployed the error is 10.7% on those and 21.0% on the other 2,206, against 20.3% on all rows (figures with the luxury cap of 2026-11-24). The published figures are right for a listing drawn like the data; for a building the models never saw they are about 0.7 point optimistic, which is inside the noise of the test split (95% CI on MAPE about ±1.3 points). The README says so. A split grouped by address would fix it and needs a new test split, which is a design decision.
 
 ## 2026-11-22: audit pass
 
@@ -84,3 +84,26 @@ No model and no published figure changed.
 - Requirements are pinned, with `requirements-dev.txt` for tests and lint. `python-dotenv` is gone: nothing imports it.
 - The API image copies only `api/`, `src/`, `monitoring/` and `models/` and runs as a non-root user. Publishing fails on a CRITICAL CVE that has a fix (Trivy).
 - The docs were cut to what a reader needs.
+
+## 2026-11-24: the drift report measures drift it used to miss
+
+`monitoring.monitor.psi()` takes its bins from the training deciles, not from ten equal-width bins over both samples. Province, city, type and state are now compared on their shares (`categorical_psi`). `check_drift.py` needs 300 logged predictions, up from 50.
+Why: equal-width bins over a long tail put 97% of the training surfaces in one bin. A shift of every surface by x1.5 read 0.076 ("OK"); it now reads 0.377. Doubled plot surfaces went from 0.030 to 0.561. In the other direction, 50 rows drawn from the validation split with no drift at all could read above 0.25 ("STRONG DRIFT"). Over 200 draws, the noisiest feature's 95th percentile PSI is 0.22 at 100 rows, 0.12 at 200 and 0.085 at 300, so from 300 a stable feature stays under 0.1.
+Any PSI computed before this date is not comparable with one computed after.
+
+## 2026-11-24: audit pass
+
+No model and no headline figure changed.
+- The range is widened to include the point estimate. Three separate models priced 12 of the 2,344 standard-segment test listings outside their own range. Coverage moves from 80.42% to 80.46%; `interval_calibration.json` still records the 80.42% that `train.py` measures without this rule.
+- `add_features()` folds garage and terrace to 0/1. The training data only holds 0 and 1, and the API reads any positive value as yes, so the price does not move; the drift log now stays on the training scale.
+- The API bounds every field well above the largest training value and caps text at 64 characters. A surface of 10^15 m² or a 100 kB city name used to get a price and a log line.
+- Only an unknown category (`src.features.UnknownCategory`) answers 422. Any other error while predicting is a 500 without its message.
+- The README, model card and Space README give the MAPE with its bootstrap interval, the share of estimates within 10% and 20%, say the range figure covers the standard segment only, and give R² on both scales.
+
+## 2026-11-24: the luxury price is capped at 1.5 times the standard estimate
+
+A property routed to the luxury model (probability 0.9 or more) gets the luxury estimate, capped at 1.5 times the standard model's (`src/train.py::LUXURY_MAX_RATIO`, `routed_price()`). The API, the CLI and both evaluation scripts call the same function.
+Why: the luxury model learned only prices above the luxury price (€1,949,050), so it never answers below about €2.2M. On the test split, 10 of the 17 routed listings were not luxury (€0.99M to €1.75M) and got about twice their price.
+Chosen on the validation split, 13 routed rows: no cap, 1.25, 1.5 and 2.0, and a gate on the standard estimate. 1.5 kept the top tier at 40.8%, brought the €1M to €1.95M tier from 28.1% to 26.8% and the overall from 21.07% to 20.98%; 1.25 cost the top tier 4 points, 2.0 changed nothing.
+Measured afterwards on the test split, not chosen on it: overall MAPE 20.6% to 20.3%, below €1M 19.9% to 19.8%, €1M to €1.95M 31.1% to 27.4%, top tier 44.0% to 43.9%; error on the 10 wrongly routed listings 103% to 42%. The README examples do not move: the Uccle villa's luxury price sits under the cap.
+Revisit when the luxury model is retrained on more rows or a lower threshold: the cap exists because it cannot price anything near €1M.

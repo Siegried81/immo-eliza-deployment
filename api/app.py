@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from api.predict import THRESHOLD_PATH, engine, load_routing_threshold, route
 from monitoring.monitor import log_prediction
+from src.features import UnknownCategory
 
 logger = logging.getLogger(__name__)
 
@@ -36,35 +37,40 @@ class PropertyInput(BaseModel):
     area acts as "has one". Optional fields left out are imputed exactly as in
     training (total surface from livable surface, distances by the pipeline's
     median imputer); defaulting them to 0 sent values the model never saw.
+
+    Upper bounds sit well above the largest training value (livable surface
+    5,000 m², plot 178,367 m², 100 bedrooms, distances 13.5 km, city names 30
+    characters): they turn an absurd request into a 422 instead of a price, and
+    cap the size of the line each request adds to the prediction log.
     """
     postcode: int = Field(..., ge=1000, le=9999)
-    province: str
-    city: str
+    province: str = Field(..., max_length=64)
+    city: str = Field(..., max_length=64)
     # Case is normalized before prediction (see src.features.to_training_vocabulary).
     property_type: Literal["HOUSE", "APARTMENT", "house", "apartment"]
-    property_state: str = "NORMAL"
-    livable_surface: int = Field(..., gt=0)
-    total_surface: Optional[int] = Field(None, ge=0, description="Plot surface in m²; 0 or missing means unknown.")
+    property_state: str = Field("NORMAL", max_length=64)
+    livable_surface: int = Field(..., gt=0, le=20_000)
+    total_surface: Optional[int] = Field(None, ge=0, le=1_000_000, description="Plot surface in m²; 0 or missing means unknown.")
     # Missing, not 1: a left-out count goes to the pipeline's median imputer
     # (3 bedrooms), as a training row without one does.
-    bedroom_count: Optional[int] = Field(None, ge=0)
+    bedroom_count: Optional[int] = Field(None, ge=0, le=200)
     # Missing, not 2000: a left-out year goes to the pipeline's median imputer,
     # like a training row without one (src/features.py::add_features).
     build_year: Optional[int] = Field(None, ge=1800)
-    garage: int = Field(0, ge=0, description="Treated as yes/no: any value above 0 means a garage.")
-    garden_m2: int = Field(0, ge=0, deprecated=True,
+    garage: int = Field(0, ge=0, le=100_000, description="Treated as yes/no: any value above 0 means a garage.")
+    garden_m2: int = Field(0, ge=0, le=10_000_000, deprecated=True,
                          description="Ignored: no model reads it. Kept so existing clients that send it still validate.")
     # Missing, not 0: 5.7% of the training listings don't say, and the median
     # imputer filled them with 1 (a terrace). Send 0 for "no terrace".
-    terrace: Optional[int] = Field(None, ge=0, description="Treated as yes/no: any value above 0 means a "
+    terrace: Optional[int] = Field(None, ge=0, le=100_000, description="Treated as yes/no: any value above 0 means a "
                                                            "terrace, 0 means none. Left out, it is unknown.")
     swimming_pool: bool = False
     energy_consumption_kWh_m2_year: int = Field(
-        0, ge=0, description="kWh/m2/year. 0, or a value above 1000, is read as unknown: "
+        0, ge=0, le=100_000_000, description="kWh/m2/year. 0, or a value above 1000, is read as unknown: "
                              "the typical figure for the property state is used.")
-    preschool_distance_m: Optional[int] = Field(None, ge=0)
-    train_station_distance_m: Optional[int] = Field(None, ge=0)
-    supermarket_distance_m: Optional[int] = Field(None, ge=0)
+    preschool_distance_m: Optional[int] = Field(None, ge=0, le=200_000)
+    train_station_distance_m: Optional[int] = Field(None, ge=0, le=200_000)
+    supermarket_distance_m: Optional[int] = Field(None, ge=0, le=200_000)
 
     @field_validator("total_surface")
     @classmethod
@@ -101,8 +107,11 @@ def predict(property_input: PropertyInput):
     data = property_input.model_dump()
     try:
         result = engine.predict(data)
-    except ValueError as e:
+    except UnknownCategory as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
+    except Exception:
+        logger.exception("Prediction failed")
+        raise HTTPException(status_code=500, detail="Internal error while computing the estimate.") from None
 
     try:
         chosen = route(result, LUXURY_THRESHOLD)

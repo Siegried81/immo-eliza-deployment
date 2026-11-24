@@ -75,37 +75,69 @@ def read_logs(path: Path | None = None) -> list[dict]:
 
 
 def psi(expected, actual, bins=10):
-    """Calculate the Population Stability Index (PSI)."""
-    expected = np.array(expected)
-    actual = np.array(actual)
-    combined = np.concatenate([expected, actual])
-    bin_edges = np.histogram_bin_edges(combined, bins=bins)
-    expected_hist, _ = np.histogram(expected, bins=bin_edges)
-    actual_hist, _ = np.histogram(actual, bins=bin_edges)
-    expected_pct = (expected_hist / len(expected)) + 1e-6
-    actual_pct = (actual_hist / len(actual)) + 1e-6
-    psi_value = np.sum((expected_pct - actual_pct) * np.log(expected_pct / actual_pct))
-    return float(psi_value)
+    """
+    Population Stability Index of `actual` against the reference `expected`.
+
+    Bin edges are the deciles of the reference, so each bin holds about a tenth
+    of it whatever the skew. Equal-width bins over a range like livable_surface
+    (median ~150 m², max 5,000 m²) put 97% of the rows in the first bin, and a
+    surface shift of x1.5 read as "OK". Values outside the reference range fall
+    in the two end bins. A discrete feature yields fewer, merged edges.
+    """
+    expected = np.asarray(expected, dtype=float)
+    actual = np.asarray(actual, dtype=float)
+    inner_edges = np.unique(np.quantile(expected, np.linspace(0, 1, bins + 1)[1:-1]))
+    expected_hist = np.bincount(np.searchsorted(inner_edges, expected, side="right"),
+                                minlength=len(inner_edges) + 1)
+    actual_hist = np.bincount(np.searchsorted(inner_edges, actual, side="right"),
+                              minlength=len(inner_edges) + 1)
+    return share_psi(expected_hist / len(expected), actual_hist / len(actual))
+
+
+def share_psi(expected_share, actual_share):
+    """PSI between two aligned arrays of bin or category shares."""
+    expected_pct = np.asarray(expected_share, dtype=float) + 1e-6
+    actual_pct = np.asarray(actual_share, dtype=float) + 1e-6
+    return float(np.sum((expected_pct - actual_pct) * np.log(expected_pct / actual_pct)))
+
+
+def categorical_psi(expected, actual):
+    """
+    PSI on category shares, for the categorical inputs (province, city...).
+
+    No binning: each category is its own bin, and a category seen only on one
+    side counts too, so traffic that is all Brussels apartments shows up.
+    """
+    expected = pd.Series(expected).astype(str)
+    actual = pd.Series(actual).astype(str)
+    categories = sorted(set(expected) | set(actual))
+    expected_share = expected.value_counts(normalize=True).reindex(categories, fill_value=0)
+    actual_share = actual.value_counts(normalize=True).reindex(categories, fill_value=0)
+    return share_psi(expected_share.to_numpy(), actual_share.to_numpy())
 
 
 def detect_drift(train_df: pd.DataFrame, live_df: pd.DataFrame, threshold=STRONG_PSI):
     """
-    PSI of every numeric column present in both frames, flagged above `threshold`.
+    PSI of every column present in both frames, flagged above `threshold`.
 
-    A column with no live value at all (say, a distance nobody fills in) gets
-    psi None rather than the NaN an empty histogram would produce.
+    Numeric columns are binned on the training deciles (psi), the others are
+    compared on category shares (categorical_psi). A column with no live value
+    at all (say, a distance nobody fills in) gets psi None.
     """
     results = {}
 
-    numerical_columns = train_df.select_dtypes(include=[np.number, bool]).columns
-    for col in numerical_columns:
+    numerical_columns = set(train_df.select_dtypes(include=[np.number, bool]).columns)
+    for col in train_df.columns:
         if col in live_df.columns:
-            train_data = train_df[col].dropna().astype(float)
-            live_data = live_df[col].dropna().astype(float)
+            train_data = train_df[col].dropna()
+            live_data = live_df[col].dropna()
             if live_data.empty:
                 results[col] = {"psi": None, "drift_detected": False}
                 continue
-            score = psi(train_data, live_data)
+            if col in numerical_columns:
+                score = psi(train_data.astype(float), pd.to_numeric(live_data, errors="coerce").dropna())
+            else:
+                score = categorical_psi(train_data, live_data)
             results[col] = {
                 "psi": score,
                 "drift_detected": score > threshold

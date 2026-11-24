@@ -5,6 +5,7 @@ The API is mocked by replacing requests.get/post, so these tests check what a
 user sees and what the UI sends, without any network call.
 """
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,8 @@ class FakeResponse:
         self.ok = status_code < 400
 
     def json(self):
+        if isinstance(self._body, Exception):
+            raise self._body
         return self._body
 
 
@@ -74,7 +77,47 @@ def test_estimate_sends_training_vocabulary_and_shows_price(api):
     assert payload["total_surface"] is None  # 0 in the UI means unknown
     assert "€ 283.578" in html_of(at)
     assert "range" in html_of(at)
-    assert [m.label for m in at.metric] == ["Price per m² (livable)", "Luxury probability"]
+    assert [m.label for m in at.metric] == ["Price per m² (livable)", "Chance it is a €1.95M+ property"]
+    assert 'aria-label="Likely range from € 240.000 to € 330.000, estimate € 283.578"' in html_of(at)
+    assert "(-15% / +16%)" in html_of(at)
+    assert any("half of the estimates" in c.value for c in at.caption)
+
+
+def test_an_edited_input_marks_the_estimate_as_stale(api):
+    at = run_app()
+    at.button[0].click().run()
+    assert not at.warning
+    at.number_input[1].set_value(300).run()  # livable surface
+    assert any("inputs changed" in w.value for w in at.warning)
+    at.button[0].click().run()
+    assert not at.warning
+
+
+def test_a_waking_api_is_retried_once(api, monkeypatch):
+    replies = [FakeResponse(503, ValueError("html page")), FakeResponse(200, STANDARD)]
+    waits = []
+    monkeypatch.setattr(requests, "post", lambda url, json, timeout: replies.pop(0))
+    monkeypatch.setattr(time, "sleep", waits.append)
+    at = run_app()
+    at.button[0].click().run()
+    assert waits.count(5) == 1 and not at.error  # Streamlit sleeps briefly on its own too
+    assert "€ 283.578" in html_of(at)
+
+
+def test_a_reply_that_is_not_json_is_an_error_message(api):
+    api.reply = FakeResponse(200, ValueError("no json"))
+    at = run_app()
+    at.button[0].click().run()
+    assert "not an estimate" in at.error[0].value
+
+
+def test_a_broken_connection_is_an_error_message(api, monkeypatch):
+    def cut(*args, **kwargs):
+        raise requests.exceptions.ChunkedEncodingError()
+    monkeypatch.setattr(requests, "post", cut)
+    at = run_app()
+    at.button[0].click().run()
+    assert "broke off" in at.error[0].value
 
 
 def test_changing_province_updates_the_city_list(api):
@@ -92,6 +135,8 @@ def test_luxury_result_has_warning_and_no_range(api):
     assert "Luxury model" in html_of(at)
     assert 'class="range"' not in html_of(at)
     assert any("luxury model" in w.value for w in at.warning)
+    # The accuracy caption describes the standard model below €1M only.
+    assert not any("half of the estimates" in c.value for c in at.caption)
 
 
 def test_rejected_input_shows_api_detail(api):

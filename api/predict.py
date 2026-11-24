@@ -14,6 +14,7 @@ from src.features import (
     load_vocabulary,
     to_training_vocabulary,
 )
+from src.train import routed_price
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 MODEL_DIR = BASE_DIR / "models"
@@ -52,14 +53,16 @@ def route(result: dict, threshold: float) -> dict:
     """
     Pick the price the user gets from one engine result.
 
-    At or above `threshold` the luxury model prices the property and no range
-    is given: the range comes from the standard-segment quantile models and,
-    next to a luxury price, would describe a different estimate. The API and
-    the CLI both call this, so they cannot answer differently.
+    At or above `threshold` the luxury model prices the property, capped by
+    src.train.routed_price, and no range is given: the range comes from the
+    standard-segment quantile models and, next to a luxury price, would
+    describe a different estimate. The API and the CLI both call this, so they
+    cannot answer differently.
     """
     is_luxury = result["luxury_proba"] >= threshold
+    price = routed_price(result["prediction"], result["luxury_prediction"], result["luxury_proba"], threshold)
     return {
-        "prediction": result["luxury_prediction"] if is_luxury else result["prediction"],
+        "prediction": float(price),
         "segment": "luxury" if is_luxury else "standard",
         "prediction_interval": None if is_luxury else result["prediction_interval"],
     }
@@ -108,9 +111,14 @@ class PredictEngine:
         # Generate luxury probability
         luxury_proba = float(self.luxury_classifier.predict_proba(df)[0][1])
 
-        # Generate prediction interval (quantile models)
+        # Prediction interval (quantile models). Three separate models can
+        # disagree: on 12 of the 2,344 test listings the point estimate fell
+        # outside its own calibrated range. The range is widened to include it,
+        # so the page never shows a price outside the range printed under it
+        # (test coverage 80.42% -> 80.46%).
         lower_pred = float(np.expm1(self.pipeline_lower.predict(df)[0] - self.interval_margin))
         upper_pred = float(np.expm1(self.pipeline_upper.predict(df)[0] + self.interval_margin))
+        lower_pred, upper_pred = min(lower_pred, standard_pred), max(upper_pred, standard_pred)
 
         return {
             "prediction": standard_pred,
