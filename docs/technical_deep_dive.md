@@ -27,7 +27,7 @@ The five models are `sklearn.Pipeline`s sharing one preprocessor (median imputat
 | `pipeline_lower.joblib`, `pipeline_upper.joblib` | 10th and 90th percentile models for the range |
 | `luxury_classifier.joblib` | Probability that a property is above the 99th percentile of training prices (about €1.95M) |
 | `pipeline_luxury.joblib` | Regressor trained on the luxury rows only, unclipped prices |
-| `luxury_threshold.json`, `interval_calibration.json` | Routing threshold (0.9), conformal margin of the range |
+| `luxury_threshold.json`, `interval_calibration.json` | Routing threshold (0.9), conformal margin of the range, the one-in-two band |
 | `categories.json`, `locations.json` | Training vocabulary; median coordinates of each training postcode and city |
 
 ## 2. The vocabulary contract
@@ -46,7 +46,7 @@ The rules for missing values, state keys, real columns and postcode locations, w
 ## 3. Training (`python -m src.train`)
 
 - **Data:** `data/clean/cleaned_data.json`, 15,746 listings scraped once from Immovlan. It is git-ignored, so a fresh clone cannot retrain. Asking prices under €10,000 are not prices and are dropped from every split by `MIN_PLAUSIBLE_PRICE`, a rule that reads the price alone, never a model's error.
-- **Four disjoint splits** from `split_all()`, one seed: train 70% (fits everything), validation 10% (early stopping, Optuna, checking the routing threshold), calibration 5% (the range margin, nothing else), test 15% (sealed: only the final figures read it). Every script imports the same helpers.
+- **Four disjoint splits** from `split_all()`, one seed: train 70% (fits everything), validation 10% (early stopping, Optuna, checking the routing threshold), calibration 5% (the range margin and the one-in-two band, nothing else), test 15% (sealed: only the final figures read it). Every script imports the same helpers.
 - **Target:** `log1p(price)`, clipped to the training rows' 1st-99th percentile for the standard and quantile models, so the standard model cannot predict above about €1.95M. That is why the luxury path exists.
 - **Standard regressor:** XGBoost, `reg:absoluteerror`, hyperparameters from a seeded Optuna search (`python -m src.optimize`, needs `pip install optuna`), hard-coded in `train.py`.
 - **Luxury classifier:** XGBoost with `scale_pos_weight` near 98, which inflates its probabilities and explains the high threshold. **Luxury regressor:** the 111 luxury rows, on unclipped prices; training it on the clipped target once made it answer €1.9M for every property, and a test now fails if it becomes constant.
@@ -71,6 +71,8 @@ The classifier decides which regressor prices the property. On the test split (`
 The standard segment returns a 10th to 90th percentile range from two quantile models. Raw, they hold the real price 70.8% of the time on the test split, not 80%. `train.py` applies conformalized quantile regression: on the standard-routed calibration rows it takes the finite-sample quantile of how far the real log price falls outside the raw range, and widens both bounds by that margin (+0.0542 in log price, bounds multiplied and divided by 1.056). The guarantee needs calibration rows that played no part in fitting the bounds, so the calibration split serves nothing else.
 
 Coverage on the 2,344 standard-routed test rows: 70.8% raw, 80.4% calibrated; over 200 random re-draws of the calibration and test rows, 80.2% on average (73.4% to 84.1%). The luxury segment gets no range: 111 rows are too few for a stable quantile fit.
+
+An 80% range has to cover the listings the model gets badly wrong, so it reads about -24% / +36% on average. The UI draws a darker band inside it, where the price lands one time in two: the central 50% of the standard model's log residuals on the same calibration rows (`train.py::likely_band`, -12.1% / +14.6%), kept inside the 80% range. It held the price on 50.1% of the 2,344 test rows. Unlike the 80% range it has the same width for every property.
 
 ## 6. Evaluation: what the numbers mean
 

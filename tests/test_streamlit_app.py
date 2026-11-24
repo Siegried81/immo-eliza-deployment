@@ -17,6 +17,7 @@ import streamlit as st
 APP_PATH = str(Path(__file__).resolve().parent.parent / "streamlit" / "app.py")
 
 STANDARD = {"prediction": 283578.0, "prediction_interval": {"lower": 240000.0, "upper": 330000.0},
+            "likely_range": {"lower": 250000.0, "upper": 320000.0},
             "currency": "EUR", "status": "success", "segment": "standard",
             "luxury_probability": 0.02, "notes": []}
 
@@ -77,9 +78,20 @@ def test_estimate_sends_training_vocabulary_and_shows_price(api):
     assert payload["total_surface"] is None  # 0 in the UI means unknown
     assert "€ 283.578" in html_of(at)
     assert "range" in html_of(at)
-    assert [m.label for m in at.metric] == ["Price per m² (livable)", "Chance it is a €1.95M+ property"]
-    assert 'aria-label="Likely range from € 240.000 to € 330.000, estimate € 283.578"' in html_of(at)
-    assert "(-15% / +16%)" in html_of(at)
+    assert [m.label for m in at.metric] == ["Price per m² (livable)", "Chance of €1.95M+"]
+    assert ('aria-label="Estimate € 283.578, wider range from € 240.000 to € 330.000, '
+            'most likely from € 250.000 to € 320.000"') in html_of(at)
+    assert "Wider range (-15% / +16%)" in html_of(at)
+    assert "Most likely</b> € 250.000 to € 320.000 (-12% / +13%)" in html_of(at)
+    assert 'class="range-likely"' in html_of(at)
+
+
+def test_an_older_api_without_the_likely_band_still_shows_the_range(api):
+    api.reply = FakeResponse(200, {k: v for k, v in STANDARD.items() if k != "likely_range"})
+    at = run_app()
+    at.button[0].click().run()
+    assert "Wider range" in html_of(at)
+    assert "Most likely" not in html_of(at)
     assert any("half of the estimates" in c.value for c in at.caption)
 
 

@@ -117,12 +117,17 @@ def predict(property_input: PropertyInput):
         chosen = route(result, LUXURY_THRESHOLD)
         log_prediction(data, chosen["prediction"], features=result.get("features"))
         interval = chosen["prediction_interval"]
+        likely = chosen["likely_range"]
 
         return {
             "prediction": round(float(chosen["prediction"]), 2),
             "prediction_interval": None if interval is None else {
                 "lower": round(interval["lower"], 2),
                 "upper": round(interval["upper"], 2)
+            },
+            "likely_range": None if likely is None else {
+                "lower": round(likely["lower"], 2),
+                "upper": round(likely["upper"], 2)
             },
             "currency": "EUR",
             "status": "success",

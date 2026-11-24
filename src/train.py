@@ -77,6 +77,10 @@ QUANTILE_UPPER = 0.90
 # Coverage the 10th-90th percentile range is calibrated to.
 INTERVAL_COVERAGE = QUANTILE_UPPER - QUANTILE_LOWER
 INTERVAL_CALIBRATION_PATH = MODEL_DIR / "interval_calibration.json"
+# The narrower band shown inside the 80% range: where the price falls one time
+# in two. The 80% range has to cover the listings the model gets badly wrong,
+# so it reads -24% / +36% on average; this one shows the likely order of size.
+LIKELY_COVERAGE = 0.5
 
 
 def load_dataset(path=DATA_PATH):
@@ -158,6 +162,54 @@ def price_tiers(luxury_price):
     return [("< €1M", 0, 1_000_000),
             (f"€1M - €{luxury_price / 1e6:.2f}M", 1_000_000, luxury_price),
             (f">= €{luxury_price / 1e6:.2f}M", luxury_price, float("inf"))]
+
+
+def likely_band(residuals_log, coverage=LIKELY_COVERAGE):
+    """
+    (low, high) log-price offsets around the standard estimate that hold
+    `coverage` of the residuals (real minus estimated log price), taken as
+    the central quantiles of the calibration rows. Split-conformal on the
+    point estimate: the band is the same width for every property, which the
+    80% range around it is not.
+    """
+    low, high = np.quantile(residuals_log, [(1 - coverage) / 2, (1 + coverage) / 2])
+    return float(low), float(high)
+
+
+def likely_band_entry(standard_model, classifier, calibration, test):
+    """
+    The `likely_*` keys of interval_calibration.json: the band from the
+    calibration rows, its coverage checked on the test rows. Only rows the API
+    gives a range to (routed to the standard model) count, as for the 80% range.
+    `standard_model` and `classifier` are the full pipelines.
+    """
+    def residuals(part):
+        X = part.drop(columns=[TARGET])
+        keep = classifier.predict_proba(X)[:, 1] < DEFAULT_ROUTING_THRESHOLD
+        return (np.log1p(part[TARGET].to_numpy()) - standard_model.predict(X))[keep]
+
+    low, high = likely_band(residuals(calibration))
+    check = residuals(test)
+    return {
+        "likely_coverage": LIKELY_COVERAGE,
+        "likely_log_low": low,
+        "likely_log_high": high,
+        "likely_check_coverage": round(float(np.mean((check >= low) & (check <= high))), 4),
+    }
+
+
+def write_likely_band(path=INTERVAL_CALIBRATION_PATH):
+    """
+    Add the likely band to interval_calibration.json from the committed models,
+    without retraining them (python -m src.train --likely-band). train() writes
+    the same keys on every full run.
+    """
+    _, _, calibration, test = split_all(load_dataset())
+    entry = likely_band_entry(joblib.load(PIPELINE_PATH), joblib.load(LUXURY_CLASSIFIER_PATH), calibration, test)
+    config = json.loads(Path(path).read_text(encoding="utf-8"))
+    Path(path).write_text(json.dumps({**config, **entry}, indent=1), encoding="utf-8")
+    print(f"Likely band: {np.expm1(entry['likely_log_low']):+.0%} / {np.expm1(entry['likely_log_high']):+.0%}, "
+          f"held the price on {entry['likely_check_coverage']:.1%} of the test rows")
 
 
 def conformal_margin(lower_log, upper_log, y_log, coverage):
@@ -331,6 +383,9 @@ def train():
             "check_rows": len(test_y),
             "check_coverage_raw": round(coverage(0.0), 4),
             "check_coverage_calibrated": round(coverage(margin), 4),
+            **likely_band_entry(Pipeline([("preprocessor", preprocessor), ("model", model)]),
+                                Pipeline([("preprocessor", preprocessor), ("model", clf)]),
+                                df.loc[X_calib.index], df.loc[X_test.index]),
         }, f, indent=1)
     print(f"Price range: coverage {coverage(0.0):.1%} -> {coverage(margin):.1%} "
           f"on {len(test_y)} test rows (log margin {margin:+.3f})")
@@ -340,6 +395,9 @@ def train():
 
 if __name__ == "__main__":
     """
-    Entry point for the training script.
+    Entry point for the training script. `--likely-band` only adds the
+    likely band to the committed calibration file, without retraining.
     """
-    train()
+    import sys
+
+    write_likely_band() if "--likely-band" in sys.argv[1:] else train()

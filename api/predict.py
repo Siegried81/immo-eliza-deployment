@@ -49,6 +49,17 @@ def load_interval_margin(path: Path = CALIBRATION_PATH) -> float:
     return float(json.loads(Path(path).read_text(encoding="utf-8"))["log_margin"])
 
 
+def load_likely_band(path: Path = CALIBRATION_PATH) -> tuple[float, float]:
+    """
+    (low, high) log offsets of the band that holds the price one time in two
+    (src/train.py::likely_band). No fallback, like the margin above: a missing
+    key means the file predates the band, and `python -m src.train
+    --likely-band` writes it.
+    """
+    config = json.loads(Path(path).read_text(encoding="utf-8"))
+    return float(config["likely_log_low"]), float(config["likely_log_high"])
+
+
 def route(result: dict, threshold: float) -> dict:
     """
     Pick the price the user gets from one engine result.
@@ -65,6 +76,7 @@ def route(result: dict, threshold: float) -> dict:
         "prediction": float(price),
         "segment": "luxury" if is_luxury else "standard",
         "prediction_interval": None if is_luxury else result["prediction_interval"],
+        "likely_range": None if is_luxury else result.get("likely_range"),
     }
 
 
@@ -78,6 +90,7 @@ class PredictEngine:
         self.pipeline_lower = joblib.load(MODEL_DIR / "pipeline_lower.joblib")
         self.pipeline_upper = joblib.load(MODEL_DIR / "pipeline_upper.joblib")
         self.interval_margin = load_interval_margin()
+        self.likely_band = load_likely_band()
         self.vocabulary = load_vocabulary()
         self.locations = load_locations()
 
@@ -119,6 +132,10 @@ class PredictEngine:
         lower_pred = float(np.expm1(self.pipeline_lower.predict(df)[0] - self.interval_margin))
         upper_pred = float(np.expm1(self.pipeline_upper.predict(df)[0] + self.interval_margin))
         lower_pred, upper_pred = min(lower_pred, standard_pred), max(upper_pred, standard_pred)
+        # The one-in-two band sits around the estimate and never outside the
+        # 80% range drawn around it.
+        likely_low = max(lower_pred, standard_pred * float(np.exp(self.likely_band[0])))
+        likely_high = min(upper_pred, standard_pred * float(np.exp(self.likely_band[1])))
 
         return {
             "prediction": standard_pred,
@@ -128,6 +145,7 @@ class PredictEngine:
                 "lower": lower_pred,
                 "upper": upper_pred
             },
+            "likely_range": {"lower": likely_low, "upper": likely_high},
             "notes": notes,
             "features": features,
         }

@@ -133,14 +133,14 @@ class TestRoutingAndRange:
     def test_standard_keeps_its_range(self):
         chosen = route({**self.RESULT, "luxury_proba": 0.2}, 0.9)
         assert chosen == {"prediction": 300_000.0, "segment": "standard",
-                          "prediction_interval": self.RESULT["prediction_interval"]}
+                          "prediction_interval": self.RESULT["prediction_interval"], "likely_range": None}
 
     def test_luxury_has_no_range(self):
         chosen = route({**self.RESULT, "luxury_proba": 0.9}, 0.9)
         # Capped at 1.5x the standard estimate: the luxury model's €2.5M for a
         # €300k house is the misrouting the cap exists for.
         assert chosen == {"prediction": 450_000.0, "segment": "luxury",
-                          "prediction_interval": None}
+                          "prediction_interval": None, "likely_range": None}
 
     def test_missing_calibration_fails_instead_of_a_zero_margin(self, tmp_path):
         with pytest.raises(FileNotFoundError):

@@ -112,3 +112,8 @@ Revisit when the luxury model is retrained on more rows or a lower threshold: th
 
 `hf/` (model card, Space image), `scripts/publish_hf.py` and its tests are gone, with `huggingface_hub` in the dev requirements. The demo is the Streamlit app, with the API on Render; the images are on Docker Hub and GHCR.
 Why: Hugging Face now hosts Docker Spaces only for PRO accounts (the Space push got 402 Payment Required), and a second copy of the models and their card on the Hub was one more place for figures to go stale (the card was a month and two retrains behind).
+
+## 2026-11-24: a "most likely" band inside the 80% range
+
+The API returns `likely_range` next to `prediction_interval`, and the UI draws it darker inside the 80% range: the band that holds the price one time in two. It is the central 50% of the standard model's log residuals on the calibration split (`src/train.py::likely_band`), -12.1% / +14.6% around the estimate, kept inside the 80% range. Measured on the test split: 50.7% raw, 50.1% as served. `train()` writes it to `interval_calibration.json`; `python -m src.train --likely-band` added it to the committed file without retraining. The calibration split now serves the range margin and this band, still nothing that fits or tunes a model.
+Why: the 80% range reads about -24% / +36% on average because it must cover the listings the model gets badly wrong, and on its own it looked like the model knew nothing. Narrowing it would have meant promising less than 8 in 10; the darker band shows the usual size without changing that promise.

@@ -69,7 +69,9 @@ def run_prediction():
     print(f"ESTIMATED PRICE: {chosen['prediction']:,.0f} € ({chosen['segment']} model)")
     interval = chosen["prediction_interval"]
     if interval:
-        print(f"Likely range: {interval['lower']:,.0f} € - {interval['upper']:,.0f} €")
+        likely = chosen["likely_range"]
+        print(f"Most likely (1 time in 2): {likely['lower']:,.0f} € - {likely['upper']:,.0f} €")
+        print(f"Wider range (8 times in 10): {interval['lower']:,.0f} € - {interval['upper']:,.0f} €")
 
 
 if __name__ == "__main__":
