@@ -1,8 +1,8 @@
 # Development-only tools: never installed in the published Docker image.
 # CI installs requirements.txt and this file.
-pytest>=9,<10
-httpx>=0.28,<1    # FastAPI's TestClient
-ruff>=0.15
+pytest>=9.2.0,<10
+httpx>=0.28.1,<1    # FastAPI's TestClient
+ruff>=0.17.6
 # debugpy: VS Code debugger, used by docker-compose.debug.yml (and locally:
 #   pip install -r requirements-dev.txt)
 debugpy>=1.8.22,<2
