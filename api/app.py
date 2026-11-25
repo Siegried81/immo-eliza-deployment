@@ -12,7 +12,7 @@ from typing import Literal, Optional
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from api.predict import THRESHOLD_PATH, engine, load_routing_threshold, route
 from monitoring.monitor import log_prediction
@@ -42,7 +42,22 @@ class PropertyInput(BaseModel):
     5,000 m², plot 178,367 m², 100 bedrooms, distances 13.5 km, city names 30
     characters): they turn an absurd request into a 422 instead of a price, and
     cap the size of the line each request adds to the prediction log.
+
+    The example is what /docs pre-fills under "Try it out". Without it Swagger
+    builds one from the bounds above (200 bedrooms on 1 m², built in 1800), and
+    a visitor's first request returns a meaningless price. Its province and city
+    are spelled as in models/categories.json, so the city is recognised.
     """
+    model_config = ConfigDict(json_schema_extra={"examples": [{
+        "postcode": 1050, "province": "Brussels", "city": "Elsene",
+        "property_type": "APARTMENT", "property_state": "NORMAL",
+        "livable_surface": 85, "bedroom_count": 2, "build_year": 1965,
+        "garage": 0, "terrace": 6, "swimming_pool": False,
+        "energy_consumption_kWh_m2_year": 180,
+        "preschool_distance_m": 350, "train_station_distance_m": 1200,
+        "supermarket_distance_m": 300,
+    }]})
+
     postcode: int = Field(..., ge=1000, le=9999)
     province: str = Field(..., max_length=64)
     city: str = Field(..., max_length=64)
@@ -58,8 +73,6 @@ class PropertyInput(BaseModel):
     # like a training row without one (src/features.py::add_features).
     build_year: Optional[int] = Field(None, ge=1800)
     garage: int = Field(0, ge=0, le=100_000, description="Treated as yes/no: any value above 0 means a garage.")
-    garden_m2: int = Field(0, ge=0, le=10_000_000, deprecated=True,
-                         description="Ignored: no model reads it. Kept so existing clients that send it still validate.")
     # Missing, not 0: 5.7% of the training listings don't say, and the median
     # imputer filled them with 1 (a terrace). Send 0 for "no terrace".
     terrace: Optional[int] = Field(None, ge=0, le=100_000, description="Treated as yes/no: any value above 0 means a "

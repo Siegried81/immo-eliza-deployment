@@ -117,3 +117,8 @@ Why: Hugging Face now hosts Docker Spaces only for PRO accounts (the Space push 
 
 The API returns `likely_range` next to `prediction_interval`, and the UI draws it darker inside the 80% range: the band that holds the price one time in two. It is the central 50% of the standard model's log residuals on the calibration split (`src/train.py::likely_band`), -12.1% / +14.6% around the estimate, kept inside the 80% range. Measured on the test split: 50.7% raw, 50.1% as served. `train()` writes it to `interval_calibration.json`; `python -m src.train --likely-band` added it to the committed file without retraining. The calibration split now serves the range margin and this band, still nothing that fits or tunes a model.
 Why: the 80% range reads about -24% / +36% on average because it must cover the listings the model gets badly wrong, and on its own it looked like the model knew nothing. Narrowing it would have meant promising less than 8 in 10; the darker band shows the usual size without changing that promise.
+
+## 2026-11-25: garden_m2 leaves the schema, /docs gets a real example
+
+- `garden_m2` is removed from `PropertyInput`. The 2026-11-22 entry kept it "so existing clients still validate", but the model never forbade extra fields: pydantic ignores an undeclared one, so an old client sending it gets the same 200 and the same price. A test pins that. Swagger no longer shows a struck-through field no model reads.
+- `/docs` pre-fills an 85 m² apartment in Elsene (Ixelles) instead of an example Swagger built from the bounds (1 m², 200 bedrooms, built in 1800). A test checks it validates, names a known city and prices like a Brussels apartment.
