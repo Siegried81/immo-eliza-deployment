@@ -168,7 +168,7 @@ class TestSchemaMatchesModels:
     def test_every_schema_field_is_read_by_a_model(self):
         """A required field no model reads (postcode once) misleads the caller;
         a model input the schema lacks is always imputed."""
-        schema = set(api.app.PropertyInput.model_fields) - {"garden_m2"}  # deprecated, ignored
+        schema = set(api.app.PropertyInput.model_fields)
         model_inputs = set(NUMERIC_FEATURES + CATEGORICAL_FEATURES) - set(DERIVED_FEATURES)
         assert model_inputs - schema == set()
         assert schema - model_inputs == set()

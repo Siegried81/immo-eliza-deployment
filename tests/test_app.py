@@ -51,6 +51,35 @@ class TestPredict:
         assert 100_000 < body["prediction"] < 1_000_000
         assert body["prediction_interval"]["lower"] <= body["prediction"] <= body["prediction_interval"]["upper"]
 
+    def test_docs_example_is_a_plausible_request(self):
+        """
+        The example /docs pre-fills is the first request most visitors send.
+        It must validate, name a city the models know (no "unknown city"
+        note), and come back with an ordinary Brussels apartment price, not a
+        value built from the schema's bounds.
+        """
+        schema = client.get("/openapi.json").json()["components"]["schemas"]["PropertyInput"]
+        example = schema["examples"][0]
+        response = client.post("/predict", json=example)
+        assert response.status_code == 200, response.json()
+        body = response.json()
+        assert body["notes"] == []
+        assert 150_000 < body["prediction"] < 700_000
+
+    def test_a_client_still_sending_garden_m2_gets_its_price(self):
+        """
+        garden_m2 is out of the schema (no model ever read it), and a client
+        written against the old schema still sends it. Pydantic ignores fields
+        it does not declare, so that request must keep answering 200 with the
+        same price as one without the field.
+        """
+        schema = client.get("/openapi.json").json()["components"]["schemas"]["PropertyInput"]
+        assert "garden_m2" not in schema["properties"]
+        example = schema["examples"][0]
+        legacy = client.post("/predict", json={**example, "garden_m2": 120})
+        assert legacy.status_code == 200, legacy.json()
+        assert legacy.json()["prediction"] == client.post("/predict", json=example).json()["prediction"]
+
     def test_predict_invalid_postcode(self):
         """
         Test prediction with an invalid postal code to trigger validation error.
